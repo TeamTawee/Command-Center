@@ -9,14 +9,14 @@ import {
   onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, updateProfile 
 } from 'firebase/auth';
 
-// 🟢 Import ไอคอนครบถ้วน (แก้ปัญหา User is not defined)
+// 🟢 Import ไอคอน
 import { 
   LayoutDashboard, Megaphone, Map, Zap, Database, Users, Menu, X, Activity, 
   Calendar, CheckCircle2, Circle, Clock, ExternalLink, FileText, Plus, 
   Link as LinkIcon, Trash2, Edit2, ChevronDown, ChevronUp, Filter, RefreshCw, 
   Save, LogOut, Lock, AlertTriangle, Globe, Loader2, Tag, Search, Shield, 
   FileClock, ArrowDownWideNarrow, User, Phone, Mail, MessageCircle, Smartphone,
-  ArrowUp, ArrowDown // เพิ่มปุ่มเลื่อนขึ้นลง
+  ArrowUp, ArrowDown
 } from 'lucide-react';
 
 // --- GLOBAL CONSTANTS ---
@@ -94,18 +94,16 @@ const formatForInput = (val) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-// 🤖 ระบบดูดข่าวอัจฉริยะ (Smart Fetch + Auto Retry + New Key)
+// 🤖 ระบบดูดข่าวอัจฉริยะ
 const fetchLinkMetadata = async (url) => {
   if (!url) return null;
   let rawHtml = null;
 
-  // 1. ลองใช้ CorsProxy
   try {
     const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
     if (res.ok) rawHtml = await res.text();
   } catch (e) { console.warn("CorsProxy failed..."); }
 
-  // 2. ลอง AllOrigins
   if (!rawHtml) {
     try {
       const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
@@ -126,31 +124,20 @@ const fetchLinkMetadata = async (url) => {
   let image = getMeta("og:image") || "";
   let date = getMeta("article:published_time") || getMeta("date") || getMeta("pubdate") || doc.querySelector("time")?.getAttribute("datetime") || "";
 
-  // ดักจับ Anti-Bot
   if (title.includes("Just a moment") || title.includes("Attention Required") || title.includes("Cloudflare")) {
       title = ""; 
   }
 
   let result = { title, image, date };
 
-  // --- AI Fallback ---
   if (!result.title || !result.date) {
       const shortHtml = rawHtml.substring(0, 15000); 
-      
-      // 🔴🔴 สำคัญ: เอา Key ใหม่ที่ได้จาก Google AI Studio มาวางแทนที่ตรงนี้ครับ 🔴🔴
       const GEMINI_API_KEY = "AIzaSyCCddMfY2JHfABUDRALO5Ci8DZHKtPZsY0"; 
       
-      // รายชื่อ Model ที่จะวนลูปหา (เพิ่ม gemini-pro ตัวมาตรฐานเข้าไป)
-      const modelCandidates = [
-          "gemini-1.5-flash",
-          "gemini-pro",         // <-- ตัวนี้เสถียรสุด
-          "gemini-1.5-pro",
-          "gemini-1.0-pro"
-      ];
+      const modelCandidates = ["gemini-1.5-flash", "gemini-pro", "gemini-1.5-pro", "gemini-1.0-pro"];
 
       for (const model of modelCandidates) {
           try {
-            // console.log(`Trying AI Model: ${model}...`);
             const prompt = `Extract metadata (title, image, date) from HTML. Return JSON ONLY: {"title": "...", "image": "...", "date": "..."}. HTML: ${shortHtml}`;
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
@@ -166,12 +153,10 @@ const fetchLinkMetadata = async (url) => {
                     if (!result.title || result.title.includes("Just a moment")) result.title = aiResult.title;
                     if (!result.image) result.image = aiResult.image;
                     if (!result.date) result.date = aiResult.date; 
-                    break; // หยุดลูปเมื่อเจอตัวที่ใช้ได้
+                    break;
                 }
             }
-          } catch (e) { 
-             // console.warn(`Error with ${model}`, e); 
-          }
+          } catch (e) { }
       }
   }
   return result;
@@ -189,7 +174,6 @@ const LoadingOverlay = ({ isOpen, message = "กำลังทำงาน..." 
   );
 };
 
-// Tag Manager Modal (อัปเกรด: แก้ไข + เลื่อนลำดับ)
 const TagManagerModal = ({ isOpen, onClose, existingTags, onSave }) => {
   const [tags, setTags] = useState([]);
   const [newTagName, setNewTagName] = useState("");
@@ -254,8 +238,6 @@ const TagManagerModal = ({ isOpen, onClose, existingTags, onSave }) => {
             <h3 className="text-xl font-bold text-slate-800">จัดการแท็ก (Tag Manager)</h3>
             <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400"/></button>
         </div>
-        <p className="text-xs text-slate-500 mb-6">แก้ไขชื่อ/สี และจัดลำดับ (เปลี่ยนชื่อจะแก้ในข่าวเก่าให้อัตโนมัติ)</p>
-
         <div className="flex gap-2 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200 shadow-sm flex-shrink-0">
             <div className="relative w-10 h-10 flex-shrink-0">
                 <input type="color" value={newTagColor} onChange={e => setNewTagColor(e.target.value)} className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10"/>
@@ -264,7 +246,6 @@ const TagManagerModal = ({ isOpen, onClose, existingTags, onSave }) => {
             <input type="text" value={newTagName} onChange={e => setNewTagName(e.target.value)} placeholder="ชื่อ Tag ใหม่..." className="flex-1 bg-white border border-slate-300 rounded-lg px-3 text-sm outline-none focus:border-blue-500" onKeyDown={(e) => e.key === 'Enter' && handleAdd()}/>
             <button onClick={handleAdd} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-bold text-xs flex items-center gap-1 shadow-blue-200 shadow-lg active:scale-95 transition-all"><Plus className="w-4 h-4" /> เพิ่ม</button>
         </div>
-
         <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
             {tags.map((tag, idx) => (
                 <div key={idx} className="flex items-center gap-3 p-2 border border-slate-100 rounded-xl bg-white hover:border-blue-200 hover:shadow-sm transition group">
@@ -444,17 +425,6 @@ const LoginScreen = () => {
   );
 };
 
-const PendingScreen = ({ onLogout }) => (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 font-sans p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center">
-            <div className="mx-auto bg-amber-100 w-16 h-16 rounded-full flex items-center justify-center mb-4"><Lock className="w-8 h-8 text-amber-600"/></div>
-            <h2 className="text-xl font-bold text-slate-800 mb-2">รอการอนุมัติสิทธิ์</h2>
-            <p className="text-slate-500 text-sm mb-6">บัญชีของคุณกำลังรอการตรวจสอบจาก Admin</p>
-            <button onClick={onLogout} className="text-red-500 font-bold hover:underline text-sm">ออกจากระบบ</button>
-        </div>
-    </div>
-);
-
 const ProfileModal = ({ isOpen, onClose, user, userProfile, onUpdate }) => {
   const [name, setName] = useState(user?.displayName || '');
   const [photo, setPhoto] = useState(user?.photoURL || '');
@@ -581,14 +551,10 @@ export default function TeamTaweeApp() {
   const openFormModal = (title, fields, onSave, submitText, additionalProps = {}) => 
       setFormModalConfig({ isOpen:true, title, fields, onSave: async(d)=>{ setIsGlobalLoading(true); try{await onSave(d); setFormModalConfig(prev=>({...prev, isOpen:false}));}catch(e){alert(e.message);} setIsGlobalLoading(false); }, submitText, ...additionalProps });
 
-  // 🟢 ฟังก์ชัน Save System Tags แบบใหม่ (แก้ชื่อ + Reorder)
   const saveSystemTags = async (newTags, renames) => {
     setIsGlobalLoading(true);
     try {
-        // 1. บันทึก Config ลง Settings
         await setDoc(doc(db, "settings", "news_config"), { tags: newTags }, { merge: true });
-
-        // 2. ถ้ามีการเปลี่ยนชื่อ Tag (Renames) ให้ไล่แก้ในข่าวเก่า
         if (renames && renames.length > 0) {
             const batch = writeBatch(db);
             let batchCount = 0;
@@ -670,7 +636,7 @@ export default function TeamTaweeApp() {
   const createUrgentCase = () => openFormModal("เปิดเคสด่วน", [{key:'title', label:'หัวข้อ'}, {key:'deadline', label:'เสร็จภายใน', type:'date'}], async(d) => { await addDoc(collection(db,"tasks"), { ...d, status:"To Do", role:"Hunter", tag:"Urgent", link:"", columnKey:"defender", sop:DEFAULT_SOP, createdBy:currentUser.displayName, createdAt:new Date().toISOString() }); alert("เปิดเคสแล้ว!"); logActivity("Open Urgent", d.title); });
   const updateUserStatus = (uid, status, role) => { updateDoc(doc(db, "user_profiles", uid), { status, role }); logActivity("Admin Update", `${uid} -> ${status}`); };
 
-  // --- RENDERING ---
+  // --- RENDERING FUNCTIONS (MOVED HERE) ---
   const sortTasks = (taskList) => {
     if(!taskList) return [];
     return [...taskList].sort((a, b) => {
@@ -729,8 +695,6 @@ export default function TeamTaweeApp() {
   const renderRapidResponse = () => (<div className="space-y-6"><PageHeader title="ปฏิบัติการด่วน" subtitle="Agile Response Unit" action={<button onClick={createUrgentCase} className="bg-red-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-red-700 shadow-lg flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> เปิดเคสด่วน</button>} /><div className="flex flex-col lg:flex-row gap-6"><div className={`lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm h-fit overflow-hidden`}><div className="p-4 bg-slate-50 font-bold text-slate-800 flex items-center gap-2 cursor-pointer" onClick={()=>setIsSopOpen(!isSopOpen)}><FileText className="w-5 h-5"/> SOP Guide (คู่มือ) <ChevronDown className={`ml-auto transform ${isSopOpen?'rotate-180':''}`}/></div>{isSopOpen && <div className="p-6 space-y-3 text-sm text-slate-600">{SOP_GUIDE.map((s,i)=><p key={i}>{s}</p>)}</div>}</div><div className="lg:w-2/3 space-y-6"><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{urgentTasks.map(task => (<div key={task.id} className="bg-white p-5 rounded-2xl border-l-[6px] border-red-500 shadow-sm hover:shadow-md cursor-pointer" onClick={() => setUrgentModal(task)}><div className="flex justify-between mb-3"><span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded animate-pulse">URGENT</span><StatusBadge status={task.status} /></div><h3 className="font-bold text-slate-800 mb-3 text-lg">{task.title}</h3>{task.deadline && <p className="text-xs text-slate-500 mb-4 flex gap-1"><Clock className="w-3.5 h-3.5"/> {task.deadline}</p>}<div className="pt-3 border-t border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Progress Checklist</p><div className="flex gap-1.5 h-2">{(task.sop && task.sop.length > 0 ? task.sop : Array(5).fill({done:false})).map((s, i) => (<div key={i} className={`flex-1 rounded-full transition-all ${s.done ? 'bg-green-500 shadow-sm' : 'bg-slate-200'}`}></div>))}</div></div></div>))}</div><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mt-4"><h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">Quick Contacts</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{media.filter(c=>c.active).map((c,i)=><div key={i} className="p-4 border rounded-xl flex justify-between group"><div className="flex flex-col"><p className="font-bold text-sm">{c.name}</p><div className="text-xs text-slate-500 flex flex-col gap-1 mt-1"><span>📞 {c.phone}</span><span>LINE: {c.line}</span></div></div><button onClick={(e)=>{e.stopPropagation(); editMedia(c)}} className="text-slate-300 hover:text-blue-600"><Edit2 className="w-4 h-4"/></button></div>)}</div><button onClick={() => navigateTo('assets')} className="text-xs text-blue-600 font-bold hover:underline mt-4 block w-full text-center border-t border-slate-100 pt-3">ดูรายชื่อทั้งหมด</button></div></div></div>{urgentModal && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-lg p-6 relative"><button onClick={()=>setUrgentModal(null)} className="absolute top-4 right-4"><X className="w-6 h-6 text-slate-400"/></button><h3 className="text-xl font-bold text-red-600 mb-6">จัดการเคสด่วน</h3><div className="space-y-4"><input type="text" value={urgentModal.title} onChange={e=>setUrgentModal({...urgentModal, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-xl p-3 font-bold" /><div className="bg-slate-50 p-4 rounded-xl border"><h4 className="font-bold mb-3">Checklist</h4>{(urgentModal.sop || DEFAULT_SOP).map((s,i)=><div key={i} className="flex gap-3 p-2 cursor-pointer" onClick={()=>{const newSop=[...(urgentModal.sop || DEFAULT_SOP)]; newSop[i] = { ...newSop[i], done: !newSop[i].done }; setUrgentModal({...urgentModal, sop:newSop})}}><div className={`w-5 h-5 rounded border flex items-center justify-center ${s.done?'bg-green-500 text-white':'bg-white'}`}>{s.done&&<CheckCircle2 className="w-3.5 h-3.5"/>}</div><span className={s.done?'line-through text-slate-400':''}>{s.text}</span></div>)}</div><div className="flex justify-between mt-6"><button onClick={async()=>{if(confirm("ปิดเคส?")){await deleteDoc(doc(db,"tasks",urgentModal.id)); logActivity("Close Case", urgentModal.title); setUrgentModal(null);}}} className="text-red-500 font-bold">ลบเคส</button><button onClick={()=>saveUrgentCase(urgentModal)} className="bg-red-600 text-white px-6 py-2 rounded-lg font-bold">บันทึก</button></div></div></div></div>}</div>);
   const renderAssets = () => (<div className="space-y-6"><PageHeader title="คลังข้อมูลสื่อ" subtitle="Media Assets" /><div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 rounded-2xl shadow-lg text-white flex justify-between items-center"><div><h3 className="text-2xl font-black mb-2">Google Drive</h3><p className="text-blue-100">พื้นที่เก็บไฟล์ต้นฉบับ</p></div><a href="https://drive.google.com/drive/folders/0AHTNNQ96Wgq-Uk9PVA" target="_blank" rel="noreferrer" className="bg-white text-blue-700 px-6 py-3 rounded-xl font-bold shadow-xl flex items-center gap-2"><ExternalLink className="w-5 h-5"/> เปิด Drive</a></div><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><div className="flex justify-between mb-6"><h3 className="font-bold text-lg">Channels</h3><button onClick={addChannel} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button></div><div className="space-y-3">{channels.map(c=><div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md cursor-pointer" onClick={()=>updateChannel(c)}><div><p className="font-bold text-slate-700">{c.name}</p><span className="text-xs bg-slate-100 px-2 py-0.5 rounded">{c.type}</span></div><button onClick={(e)=>{e.stopPropagation(); deleteChannel(c.id)}}><Trash2 className="w-5 h-5 text-slate-300 hover:text-red-500"/></button></div>)}</div></div><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><div className="flex justify-between mb-6"><h3 className="font-bold text-lg">Media List</h3><button onClick={addMedia} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button></div><div className="space-y-3 overflow-y-auto max-h-[500px]">{media.map(c=><div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md"><div><p className="font-bold text-slate-700">{c.name}</p><div className="text-xs text-slate-500 mt-1 flex gap-2"><span>📞 {c.phone}</span><span>LINE: {c.line}</span></div></div><div className="flex gap-2"><button onClick={()=>editMedia(c)}><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600"/></button><button onClick={()=>deleteMedia(c.id)}><Trash2 className="w-4 h-4 text-slate-300 hover:text-red-500"/></button></div></div>)}</div></div></div></div>);
 
-  // คัดลอกฟังก์ชันนี้ไปทับ renderNewsroom ตัวเดิมได้เลยครับ
-
   const renderNewsroom = () => {
     const usedTags = new Set(publishedLinks.flatMap(link => link.tags || []));
     systemTags.forEach(t => usedTags.add(t.name));
@@ -774,12 +738,10 @@ export default function TeamTaweeApp() {
             <button onClick={() => { setNewsStartDate(''); setNewsEndDate(''); setNewsFilterTag('All'); }} className="p-2 text-slate-400 hover:text-red-500" title="ล้างค่า"><RefreshCw className="w-4 h-4" /></button>
             <div className="w-px h-8 bg-slate-200 mx-1"></div>
             <button onClick={() => setIsTagManagerOpen(true)} className="bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-black shadow-md flex items-center gap-2 h-fit mb-0.5"><Tag className="w-3.5 h-3.5" /> จัดการ Tag</button>
-            {/* ปุ่มเดิมข้างบนยังเก็บไว้ หรือจะลบออกก็ได้ครับ */}
             <button onClick={() => addPublishedLink()} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 shadow-md flex items-center gap-2 h-fit mb-0.5"><Plus className="w-4 h-4" /> เพิ่มข่าว</button>
           </div>
         } />
 
-        {/* --- ส่วนเนื้อหาข่าว --- */}
         <div className="w-full overflow-x-auto pb-2 custom-scrollbar -mt-2">
           <div className="flex items-center gap-2 min-w-max px-1">
             <Tag className="w-4 h-4 text-slate-400 mr-2" />
@@ -836,15 +798,13 @@ export default function TeamTaweeApp() {
           ))
         )}
 
-        {/* 🟢 🟢 🟢 ส่วนที่เพิ่มใหม่: ปุ่ม Floating Button ลอยอยู่ขวาล่าง 🟢 🟢 🟢 */}
         <button
           onClick={() => addPublishedLink()}
           className="fixed bottom-8 right-8 z-[50] bg-blue-600 text-white w-14 h-14 rounded-full shadow-2xl hover:bg-blue-700 hover:scale-110 active:scale-95 transition-all duration-300 flex items-center justify-center group"
           title="เพิ่มข่าวประชาสัมพันธ์"
-          style={{ boxShadow: '0 4px 20px rgba(37, 99, 235, 0.5)' }} // เพิ่มแสงเงาให้ดูเด่น
+          style={{ boxShadow: '0 4px 20px rgba(37, 99, 235, 0.5)' }} 
         >
           <Plus className="w-8 h-8" />
-          {/* Tooltip เล็กๆ เวลาชี้ */}
           <span className="absolute right-16 bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
             เพิ่มข่าวใหม่
           </span>
@@ -897,6 +857,10 @@ export default function TeamTaweeApp() {
       default: return null;
     }
   };
+
+  // --- FINAL RETURN WITH AUTH CHECKS ---
+  if (authLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-blue-600"/></div>;
+  if (!currentUser) return <LoginScreen />;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 flex flex-col md:flex-row">
