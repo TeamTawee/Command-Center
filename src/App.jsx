@@ -1,451 +1,111 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from './firebaseConfig'; 
 import { 
   collection, addDoc, updateDoc, deleteDoc, doc, 
   query, orderBy, setDoc, getDoc, serverTimestamp, 
-  writeBatch, getDocs, where 
-} from 'firebase/firestore'; // 🟢 เอา onSnapshot ออกแล้ว
+  writeBatch, getDocs, where, 
+  onSnapshot 
+} from 'firebase/firestore'; 
 import { 
-  onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, updateProfile 
+  onAuthStateChanged, updateProfile 
 } from 'firebase/auth';
 
 import { 
-  LayoutDashboard, Megaphone, Map, Zap, Database, Users, Menu, X, Activity, 
+  LayoutDashboard, Megaphone, Map as MapIcon, Zap, Database, Users, Menu, X, Activity, 
   Calendar, CheckCircle2, Circle, Clock, ExternalLink, FileText, Plus, 
   Link as LinkIcon, Trash2, Edit2, ChevronDown, ChevronUp, Filter, RefreshCw, 
-  Save, LogOut, Lock, AlertTriangle, Globe, Loader2, Tag, Search, Shield, 
-  FileClock, ArrowDownWideNarrow, User, Phone, Mail, MessageCircle, Smartphone,
-  ArrowUp, ArrowDown
+  LogOut, Lock, AlertTriangle, Globe, Loader2, Tag, Search, Shield, 
+  FileClock, ArrowDownWideNarrow, User
 } from 'lucide-react';
 
-// --- GLOBAL CONSTANTS ---
-const PRESET_TAGS = [
-  "Visual Storytelling", "Viral", "Tradition", "Knowledge", "Urgent", "Report", "System", "Event", "Crisis",
-  "Quote", "Infographic", "Single Photo"
-];
+// --- IMPORTS FROM SUB-FILES ---
+import { LoginScreen } from './LoginScreen.jsx';
+import { LoadingOverlay, PageHeader, StatusBadge, StatusDonutChart } from './UI.jsx';
+import { TagManagerModal, SearchModal, FormModal, ProfileModal } from './Modals.jsx';
+import { 
+    formatDate, getWeekNumber, getDomain, formatForInput, fetchLinkMetadata 
+} from './utils.js';
+import { 
+    PRESET_TAGS, ASSET_TYPES, TASK_STATUSES, DEFAULT_SOP, SOP_GUIDE, 
+    COLUMN_LABELS, COL_DESCRIPTIONS 
+} from './constants.js';
 
-const ASSET_TYPES = ["Own media", "Partner", "NEWS Paper", "NEWS Website", "Fan Club (own)"];
-const TASK_STATUSES = ["To Do", "In Progress", "In Review", "Done", "Idea", "Waiting list", "Canceled"];
+// --- Multi-select Tag Component for Strategy Board ---
+const MultiTagSelector = ({ availableTags, selectedTags, onTagsChange }) => {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const dropdownRef = React.useRef(null);
 
-const DEFAULT_SOP = [
-  { text: "1. ทีม Monitor สรุปประเด็น (ใคร? ทำอะไร? กระทบเรายังไง?)", done: false },
-  { text: "2. ร่าง Message สั้นๆ (เน้น Fact + จุดยืน)", done: false },
-  { text: "3. ขอ Approved ด่วน (Line/โทร)", done: false },
-  { text: "4. ผลิตสื่อด่วน (Graphic Quote หรือ คลิปสัมภาษณ์สั้น)", done: false },
-  { text: "5. กระจายลง Social Media & ส่งกลุ่มนักข่าว", done: false }
-];
-
-const SOP_GUIDE = [
-  "1. ทีม Monitor สรุปประเด็น (ใคร? ทำอะไร? กระทบเรายังไง?)",
-  "2. ร่าง Message สั้นๆ (เน้น Fact + จุดยืน)",
-  "3. ขอ Approved ด่วน (Line/โทร)",
-  "4. ผลิตสื่อด่วน (Graphic Quote หรือ คลิปสัมภาษณ์สั้น)",
-  "5. กระจายลง Social Media & ส่งกลุ่มนักข่าว"
-];
-
-const COLUMN_LABELS = {
-    solver: "1. ผลงาน (Solver)",
-    principles: "2. จุดยืน (Principles)",
-    defender: "3. ตอบโต้ (Defender)",
-    expert: "4. ผู้เชี่ยวชาญ (Expert)",
-    backoffice: "5. หลังบ้าน (Back Office)"
-};
-
-const COL_DESCRIPTIONS = {
-    solver: "งานรูทีน, ลงพื้นที่, แก้ปัญหาชาวบ้าน",
-    principles: "Quote คำคม, อุดมการณ์, Viral, Brand",
-    defender: "ชี้แจงข่าวบิดเบือน, ประเด็นร้อน, Agile",
-    expert: "วิเคราะห์เชิงลึก, กฎหมาย, Knowledge",
-    backoffice: "เอกสาร, งบประมาณ, ระบบ IT"
-};
-
-// --- HELPER FUNCTIONS ---
-const formatDate = (val) => {
-  if (!val) return "-";
-  try {
-    const d = val.toDate ? val.toDate() : new Date(val);
-    if (isNaN(d.getTime())) return "-";
-    return d.toLocaleString('th-TH', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
-  } catch (e) { return "-"; }
-};
-
-const getWeekNumber = (d) => {
-  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
-  var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-  var weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
-  return `Week ${weekNo}`;
-};
-
-const getDomain = (url) => {
-  try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return 'External'; }
-};
-
-const formatForInput = (val) => {
-  if (!val) return '';
-  let d;
-  if (val && typeof val.toDate === 'function') { d = val.toDate(); } else { d = new Date(val); }
-  if (isNaN(d.getTime())) d = new Date();
-  const pad = (n) => n < 10 ? '0' + n : n;
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-
-// 🤖 ระบบดูดข่าวอัจฉริยะ
-const fetchLinkMetadata = async (url) => {
-  if (!url) return null;
-  let rawHtml = null;
-
-  try {
-    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-    if (res.ok) rawHtml = await res.text();
-  } catch (e) { console.warn("CorsProxy failed..."); }
-
-  if (!rawHtml) {
-    try {
-      const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
-      if (proxyRes.ok) {
-          const proxyData = await proxyRes.json();
-          if (proxyData.contents) rawHtml = proxyData.contents;
-      }
-    } catch (e) { console.warn("All proxies failed."); }
-  }
-
-  if (!rawHtml) return null; 
-
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(rawHtml, "text/html");
-  const getMeta = (prop) => doc.querySelector(`meta[property="${prop}"]`)?.content || doc.querySelector(`meta[name="${prop}"]`)?.content;
-
-  let title = getMeta("og:title") || doc.title || "";
-  let image = getMeta("og:image") || "";
-  let date = getMeta("article:published_time") || getMeta("date") || getMeta("pubdate") || doc.querySelector("time")?.getAttribute("datetime") || "";
-
-  if (title.includes("Just a moment") || title.includes("Attention Required") || title.includes("Cloudflare")) {
-      title = ""; 
-  }
-
-  let result = { title, image, date };
-
-  if (!result.title || !result.date) {
-      const shortHtml = rawHtml.substring(0, 15000); 
-      const GEMINI_API_KEY = "AIzaSyCCddMfY2JHfABUDRALO5Ci8DZHKtPZsY0"; 
-      
-      const modelCandidates = ["gemini-1.5-flash", "gemini-pro", "gemini-1.5-pro", "gemini-1.0-pro"];
-
-      for (const model of modelCandidates) {
-          try {
-            const prompt = `Extract metadata (title, image, date) from HTML. Return JSON ONLY: {"title": "...", "image": "...", "date": "..."}. HTML: ${shortHtml}`;
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-            });
-
-            if (response.ok) {
-                const aiData = await response.json();
-                const textResponse = aiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (textResponse) {
-                    const cleanJson = textResponse.replace(/```json|```/g, '').trim();
-                    const aiResult = JSON.parse(cleanJson);
-                    if (!result.title || result.title.includes("Just a moment")) result.title = aiResult.title;
-                    if (!result.image) result.image = aiResult.image;
-                    if (!result.date) result.date = aiResult.date; 
-                    break;
-                }
-            }
-          } catch (e) { }
-      }
-  }
-  return result;
-};
-
-// --- COMPONENTS ---
-
-const LoadingOverlay = ({ isOpen, message = "กำลังทำงาน..." }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center z-[2000] animate-fadeIn">
-      <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-3" />
-      <p className="text-slate-600 font-bold animate-pulse">{message}</p>
-    </div>
+  const filteredTags = availableTags.filter(tag => 
+    tag.toLowerCase().includes(searchTerm.toLowerCase()) && !selectedTags.includes(tag)
   );
-};
 
-const TagManagerModal = ({ isOpen, onClose, existingTags, onSave }) => {
-  const [tags, setTags] = useState([]);
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#3b82f6");
-
-  useEffect(() => {
-    if (isOpen) {
-        const initTags = (existingTags && existingTags.length > 0 ? existingTags : [
-            { name: "Breaking News", color: "#ef4444" }, 
-            { name: "PR News", color: "#3b82f6" },       
-            { name: "Event", color: "#10b981" },         
-            { name: "Official", color: "#6366f1" }       
-        ]).map(t => ({ ...t, originalName: t.name }));
-        setTags(initTags);
-    }
-  }, [isOpen, existingTags]);
-
-  const handleAdd = () => {
-    if (!newTagName.trim()) return;
-    if (tags.some(t => t.name.toLowerCase() === newTagName.trim().toLowerCase())) {
-        alert("ชื่อ Tag นี้มีอยู่แล้ว");
-        return;
-    }
-    setTags([...tags, { name: newTagName.trim(), color: newTagColor, originalName: null }]);
-    setNewTagName("");
+  const toggleTag = (tag) => {
+    const newTags = selectedTags.includes(tag)
+      ? selectedTags.filter(t => t !== tag)
+      : [...selectedTags, tag];
+    onTagsChange(newTags);
   };
 
-  const handleDelete = (index) => {
-    if(confirm("ต้องการลบ Tag นี้ออกจากระบบ?")) {
-        setTags(tags.filter((_, i) => i !== index));
+  const handleAddNewTag = () => {
+    const newTag = searchTerm.trim();
+    if (newTag && !availableTags.includes(newTag) && !selectedTags.includes(newTag)) {
+      onTagsChange([...selectedTags, newTag]);
+      setSearchTerm('');
     }
   };
-
-  const moveTag = (index, direction) => {
-    const newTags = [...tags];
-    const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= newTags.length) return;
-    const temp = newTags[index];
-    newTags[index] = newTags[targetIndex];
-    newTags[targetIndex] = temp;
-    setTags(newTags);
-  };
-
-  const updateTag = (index, field, value) => {
-    const newTags = [...tags];
-    newTags[index] = { ...newTags[index], [field]: value };
-    setTags(newTags);
-  };
-
-  const handleSave = () => {
-      const cleanTags = tags.map(({ name, color }) => ({ name, color }));
-      const renames = tags.filter(t => t.originalName && t.originalName !== t.name).map(t => ({ oldName: t.originalName, newName: t.name }));
-      onSave(cleanTags, renames);
-  };
-
-  if (!isOpen) return null;
+  
+  React.useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1300] p-4 animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 relative flex flex-col max-h-[85vh]">
-        <div className="flex justify-between items-start mb-1">
-            <h3 className="text-xl font-bold text-slate-800">จัดการแท็ก (Tag Manager)</h3>
-            <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400"/></button>
-        </div>
-        <div className="flex gap-2 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200 shadow-sm flex-shrink-0">
-            <div className="relative w-10 h-10 flex-shrink-0">
-                <input type="color" value={newTagColor} onChange={e => setNewTagColor(e.target.value)} className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10"/>
-                <div className="w-full h-full rounded-lg border-2 border-white shadow-sm" style={{backgroundColor: newTagColor}}></div>
+    <div className="relative" ref={dropdownRef}>
+      <label className="text-sm font-bold text-slate-600 mb-2 block">Tags</label>
+      <div className="w-full border-2 border-slate-200 rounded-lg p-2 flex flex-wrap gap-2 items-center cursor-text min-h-[44px]" onClick={() => {setIsOpen(true); dropdownRef.current.querySelector('input').focus();}}>
+        {selectedTags.map(tag => (
+          <span key={tag} className="bg-blue-500 text-white px-2 py-1 rounded-md text-xs flex items-center gap-1.5 animate-fadeIn">
+            {tag}
+            <button onClick={(e) => { e.stopPropagation(); toggleTag(tag); }} className="text-white/70 hover:text-white">
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        ))}
+        <input 
+          type="text"
+          value={searchTerm}
+          onChange={e => { setSearchTerm(e.target.value); if (!isOpen) setIsOpen(true); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleAddNewTag(); }
+            else if (e.key === 'Backspace' && searchTerm === '' && selectedTags.length > 0) { toggleTag(selectedTags[selectedTags.length - 1]); }
+          }}
+          className="flex-grow outline-none bg-transparent text-sm p-1"
+          placeholder={selectedTags.length === 0 ? 'เพิ่ม Tag...' : ''}
+          onFocus={() => setIsOpen(true)}
+        />
+      </div>
+      {isOpen && (
+        <div className="absolute top-full left-0 w-full bg-white border border-slate-300 mt-1 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+          {filteredTags.length > 0 && filteredTags.map(tag => (
+            <div key={tag} onClick={() => toggleTag(tag)} className="px-4 py-2 hover:bg-slate-100 cursor-pointer text-sm">{tag}</div>
+          ))}
+          {searchTerm && !availableTags.map(t=>t.toLowerCase()).includes(searchTerm.trim().toLowerCase()) && (
+            <div onClick={handleAddNewTag} className="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm font-bold text-blue-600">
+              + สร้าง Tag ใหม่ "{searchTerm.trim()}"
             </div>
-            <input type="text" value={newTagName} onChange={e => setNewTagName(e.target.value)} placeholder="ชื่อ Tag ใหม่..." className="flex-1 bg-white border border-slate-300 rounded-lg px-3 text-sm outline-none focus:border-blue-500" onKeyDown={(e) => e.key === 'Enter' && handleAdd()}/>
-            <button onClick={handleAdd} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-bold text-xs flex items-center gap-1 shadow-blue-200 shadow-lg active:scale-95 transition-all"><Plus className="w-4 h-4" /> เพิ่ม</button>
+          )}
         </div>
-        <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
-            {tags.map((tag, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-2 border border-slate-100 rounded-xl bg-white hover:border-blue-200 hover:shadow-sm transition group">
-                    <div className="flex flex-col gap-0.5">
-                        <button onClick={() => moveTag(idx, -1)} disabled={idx === 0} className={`p-0.5 rounded hover:bg-slate-100 ${idx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-slate-400 hover:text-blue-600'}`}><ArrowUp className="w-3 h-3" /></button>
-                        <button onClick={() => moveTag(idx, 1)} disabled={idx === tags.length - 1} className={`p-0.5 rounded hover:bg-slate-100 ${idx === tags.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-slate-400 hover:text-blue-600'}`}><ArrowDown className="w-3 h-3" /></button>
-                    </div>
-                    <div className="relative w-8 h-8 flex-shrink-0 group/color cursor-pointer">
-                        <input type="color" value={tag.color} onChange={(e) => updateTag(idx, 'color', e.target.value)} className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10" title="คลิกเพื่อเปลี่ยนสี"/>
-                        <div className="w-full h-full rounded-full border shadow-sm transition-transform group-hover/color:scale-110" style={{backgroundColor: tag.color}}></div>
-                    </div>
-                    <input type="text" value={tag.name} onChange={(e) => updateTag(idx, 'name', e.target.value)} className="flex-1 text-sm font-bold text-slate-700 bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none px-1 py-0.5 transition-colors"/>
-                    <button onClick={() => handleDelete(idx)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4"/></button>
-                </div>
-            ))}
-        </div>
-        <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end bg-white">
-            <button onClick={handleSave} className="w-full sm:w-auto bg-slate-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-black shadow-xl shadow-slate-200 flex items-center justify-center gap-2 active:scale-95 transition-all"><Save className="w-4 h-4"/> บันทึกการเปลี่ยนแปลง</button>
-        </div>
-      </div>
+      )}
     </div>
   );
 };
 
-const SearchModal = ({ isOpen, onClose, data, onNavigate }) => {
-  const [query, setQuery] = useState("");
-  if (!isOpen) return null;
-  const results = query.length < 2 ? [] : [
-    ...data.tasks.filter(t => t.title?.toLowerCase().includes(query.toLowerCase())).map(t => ({ ...t, type: 'Task', label: t.title, sub: t.status })),
-    ...data.media.filter(m => m.name?.toLowerCase().includes(query.toLowerCase())).map(m => ({ ...m, type: 'Media', label: m.name, sub: m.phone })),
-    ...data.channels.filter(c => c.name?.toLowerCase().includes(query.toLowerCase())).map(c => ({ ...c, type: 'Channel', label: c.name, sub: c.url })),
-  ];
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center z-[1500] p-4 pt-20 animate-fadeIn" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="p-4 border-b border-slate-100 flex items-center gap-3"><Search className="w-6 h-6 text-slate-400" /><input autoFocus className="flex-1 text-lg outline-none text-slate-700 placeholder:text-slate-300" placeholder="ค้นหา..." value={query} onChange={e => setQuery(e.target.value)}/><button onClick={onClose} className="p-1 bg-slate-100 rounded-md text-xs text-slate-500">ESC</button></div>
-        <div className="max-h-[60vh] overflow-y-auto bg-slate-50/50">
-           {results.length > 0 ? (<div className="p-2">{results.map((res, idx) => (<div key={idx} className="p-3 hover:bg-blue-50 rounded-lg cursor-pointer flex items-center justify-between group transition" onClick={() => { if(res.type === 'Task') onNavigate('strategy'); if(res.type === 'Media' || res.type === 'Channel') onNavigate('assets'); onClose(); }}><div><p className="font-bold text-slate-800 text-sm">{res.label}</p><p className="text-xs text-slate-500">{res.type} • {res.sub}</p></div><span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100">ไปที่หน้า →</span></div>))}</div>) : query.length > 0 ? <div className="p-10 text-center text-slate-400">ไม่พบข้อมูล</div> : <div className="p-10 text-center text-slate-400 text-sm">พิมพ์คำค้นหา...</div>}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const FormModal = ({ isOpen, onClose, title, fields, onSave, submitText = "บันทึก", availableTags = [] }) => {
-  const [formData, setFormData] = useState({});
-  const [tagInput, setTagInput] = useState(""); 
-
-  useEffect(() => {
-    if (isOpen) {
-      const initialData = {};
-      fields.forEach(f => {
-        if (f.type === 'tags') initialData[f.key] = f.defaultValue || [];
-        else initialData[f.key] = f.defaultValue !== undefined ? f.defaultValue : '';
-      });
-      setFormData(initialData);
-      setTagInput("");
-    }
-  }, [isOpen, fields]);
-
-  const findTagInfo = (name) => availableTags.find(t => t.name === name) || { name, color: '#94a3b8' };
-
-  const handleAddTag = (key, val) => {
-    if (!val.trim()) return;
-    const currentTags = formData[key] || [];
-    if (!currentTags.includes(val.trim())) setFormData({ ...formData, [key]: [...currentTags, val.trim()] });
-    setTagInput("");
-  };
-
-  const handleRemoveTag = (key, tagToRemove) => {
-    const currentTags = formData[key] || [];
-    setFormData({ ...formData, [key]: currentTags.filter(t => t !== tagToRemove) });
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 transform transition-all scale-100 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
-        <button onClick={onClose} className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded-full transition"><X className="w-5 h-5 text-slate-400" /></button>
-        <h3 className="text-xl font-bold text-slate-800 mb-6 pr-8">{title}</h3>
-        <div className="space-y-5">
-           {fields.map((field) => (
-             <div key={field.key}>
-                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase flex items-center gap-2">{field.label}</label>
-                {field.type === 'tags' ? (
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {(formData[field.key] || []).map((t, i) => {
-                         const info = findTagInfo(t);
-                         return (<span key={i} className="text-white text-xs font-bold px-2 py-1 rounded-md flex items-center gap-1 shadow-sm" style={{ backgroundColor: info.color }}>#{t}<button onClick={() => handleRemoveTag(field.key, t)}><X className="w-3 h-3 hover:text-red-200"/></button></span>);
-                      })}
-                    </div>
-                    <div className="flex gap-2">
-                      <input type="text" value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter') { e.preventDefault(); handleAddTag(field.key, tagInput); } }} className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-500" placeholder="พิมพ์ Tag..." />
-                      <button onClick={() => handleAddTag(field.key, tagInput)} className="bg-slate-200 p-2 rounded-lg hover:bg-slate-300"><Plus className="w-4 h-4"/></button>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                       {availableTags.map(pt => (<button key={pt.name} onClick={() => handleAddTag(field.key, pt.name)} className="text-[10px] bg-white border border-slate-200 px-2 py-1 rounded-full text-slate-600 hover:brightness-95 transition flex items-center gap-1" style={{ borderLeft: `3px solid ${pt.color}` }}>+ {pt.name}</button>))}
-                    </div>
-                  </div>
-                ) : field.type === 'select' ? (
-                   <div className="relative"><select value={formData[field.key]} onChange={(e) => setFormData({...formData, [field.key]: e.target.value})} className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm bg-slate-50 focus:bg-white focus:border-blue-500 outline-none appearance-none font-medium text-slate-700 transition-all">{field.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select><ChevronDown className="absolute right-3 top-3.5 w-4 h-4 text-slate-400 pointer-events-none"/></div>
-                ) : (
-                   <input type={field.type || 'text'} value={formData[field.key]} onChange={(e) => setFormData({...formData, [field.key]: e.target.value})} className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm focus:bg-white focus:border-blue-500 outline-none font-medium text-slate-700 transition-all placeholder:text-slate-300" placeholder={field.placeholder || ''} list={field.type === 'datalist' ? `list-${field.key}` : undefined} />
-                )}
-                {field.type === 'datalist' && <datalist id={`list-${field.key}`}>{field.options.map(opt => <option key={opt} value={opt} />)}</datalist>}
-             </div>
-           ))}
-        </div>
-        <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-slate-100">
-          <button onClick={onClose} className="px-5 py-2.5 text-slate-500 font-bold hover:bg-slate-100 rounded-xl transition-colors text-sm">ยกเลิก</button>
-          <button onClick={() => onSave(formData)} className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all active:scale-95 text-sm">{submitText}</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const PageHeader = ({ title, subtitle, action }) => (
-  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-    <div><h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">{title}</h2><p className="text-slate-500 text-sm mt-1 font-medium">{subtitle}</p></div>
-    <div className="w-full md:w-auto">{action}</div>
-  </div>
-);
-
-const StatusBadge = ({ status }) => {
-  const styles = { "To Do": "bg-slate-100 text-slate-600 border-slate-200", "In Progress": "bg-blue-50 text-blue-600 border-blue-100", "In Review": "bg-purple-50 text-purple-600 border-purple-100", "Done": "bg-emerald-50 text-emerald-600 border-emerald-100", "Idea": "bg-yellow-50 text-yellow-600 border-yellow-100", "Waiting list": "bg-orange-50 text-orange-600 border-orange-100", "Canceled": "bg-gray-50 text-gray-400 border-gray-200 line-through" };
-  return <span className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wide font-bold border ${styles[status] || "bg-gray-100"}`}>{status}</span>;
-};
-
-const StatusDonutChart = ({ stats }) => {
-  const total = stats.total || 1; 
-  const donePercent = (stats.done / total) * 100;
-  const doingPercent = (stats.doing / total) * 100;
-  const circumference = 2 * Math.PI * 40;
-  return (
-    <div className="relative w-48 h-48 flex items-center justify-center">
-      <svg className="transform -rotate-90 w-full h-full" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r="40" fill="none" className="stroke-slate-200" strokeWidth="12" strokeLinecap="round" />
-        <circle cx="50" cy="50" r="40" fill="none" className="stroke-blue-500 transition-all duration-1000 ease-out" strokeWidth="12" strokeDasharray={`${(donePercent + doingPercent) / 100 * circumference} ${circumference}`} strokeLinecap="round" />
-        <circle cx="50" cy="50" r="40" fill="none" className="stroke-emerald-500 transition-all duration-1000 ease-out" strokeWidth="12" strokeDasharray={`${(donePercent / 100) * circumference} ${circumference}`} strokeLinecap="round" />
-      </svg>
-      <div className="absolute text-center"><span className="text-4xl font-black text-slate-800">{stats.total}</span><span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">ACTIVE TASKS</span></div>
-    </div>
-  );
-};
-
-const LoginScreen = () => {
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const handleGoogleLogin = async () => {
-    setError(''); setLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      const docRef = doc(db, "user_profiles", user.uid);
-      const docSnap = await getDoc(docRef);
-      if (!docSnap.exists()) { await setDoc(docRef, { phone: "", role: "Member", status: "Active", email: user.email, displayName: user.displayName, photoURL: user.photoURL, createdAt: serverTimestamp() }); }
-    } catch (err) { setError("เข้าสู่ระบบไม่สำเร็จ: " + err.message); }
-    setLoading(false);
-  };
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50 font-sans p-4">
-      <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md border border-white/50 backdrop-blur-sm text-center relative overflow-hidden">
-         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
-         <div className="mb-8"><h1 className="text-4xl font-black text-slate-900 tracking-tight">TEAM TAWEE</h1><p className="text-blue-600 font-bold tracking-widest text-xs uppercase mt-2 bg-blue-50 inline-block px-3 py-1 rounded-full">Stand Together</p></div>
-         <h2 className="text-xl font-bold text-slate-800 mb-2">ยินดีต้อนรับสู่ระบบ</h2>
-         <p className="text-slate-500 text-sm mb-8">ศูนย์ปฏิบัติการและบริหารงานยุทธศาสตร์</p>
-         {error && <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4 font-medium border border-red-100">{error}</div>}
-         <button onClick={handleGoogleLogin} disabled={loading} className="w-full bg-white border-2 border-slate-200 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-50 hover:border-blue-300 hover:shadow-md transition-all flex items-center justify-center gap-3 group">
-            {loading ? <RefreshCw className="w-5 h-5 animate-spin text-blue-600" /> : "เข้าสู่ระบบด้วย Google"}
-         </button>
-      </div>
-    </div>
-  );
-};
-
-const ProfileModal = ({ isOpen, onClose, user, userProfile, onUpdate }) => {
-  const [name, setName] = useState(user?.displayName || '');
-  const [photo, setPhoto] = useState(user?.photoURL || '');
-  const [phone, setPhone] = useState(userProfile?.phone || '');
-  useEffect(() => { if(user) { setName(user.displayName||''); setPhoto(user.photoURL||''); setPhone(userProfile?.phone||''); } }, [user, userProfile]);
-  const handleSave = async () => { await onUpdate(name, photo, phone); onClose(); };
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold text-slate-800">แก้ไขข้อมูลส่วนตัว</h3><button onClick={onClose}><X className="w-6 h-6 text-slate-400" /></button></div>
-        <div className="space-y-4">
-            <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full border p-2.5 rounded-lg" placeholder="ชื่อแสดงผล" />
-            <input type="text" value={phone} onChange={e => setPhone(e.target.value)} className="w-full border p-2.5 rounded-lg" placeholder="เบอร์โทรศัพท์" />
-            <input type="text" value={photo} onChange={e => setPhoto(e.target.value)} className="w-full border p-2.5 rounded-lg" placeholder="Link รูปโปรไฟล์" />
-        </div>
-        <button onClick={handleSave} className="w-full mt-6 bg-blue-600 text-white font-bold py-2.5 rounded-lg hover:bg-blue-700">บันทึกข้อมูล</button>
-        <button onClick={() => signOut(auth)} className="w-full mt-3 text-red-500 font-bold text-sm hover:underline flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> ออกจากระบบ</button>
-      </div>
-    </div>
-  );
-};
 
 // --- MAIN APP ---
 export default function TeamTaweeApp() {
@@ -476,6 +136,43 @@ export default function TeamTaweeApp() {
   const [newsFilterTag, setNewsFilterTag] = useState('All'); 
   const [systemTags, setSystemTags] = useState([]);
   const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
+  const [strategyTags, setStrategyTags] = useState([]); // Tags from Settings
+  const [isStrategyTagManagerOpen, setIsStrategyTagManagerOpen] = useState(false);
+
+  // --- 1. CALCULATE RAW TAG LIST (For Dropdowns & Filtering) ---
+  const strategyBoardAllTags = useMemo(() => {
+    const all = new Set(['All', ...PRESET_TAGS]);
+    // Tags from DB Settings
+    if (strategyTags) strategyTags.forEach(t => all.add(t.name));
+    // Tags from Existing Tasks (สำคัญ: ดึงจาก Task จริงที่โชว์ในภาพ Screenshot)
+    tasks.forEach(t => {
+      if (Array.isArray(t.tags)) t.tags.forEach(tag => all.add(tag));
+      else if (t.tag) t.tag.split(',').map(s => s.trim()).filter(Boolean).forEach(tag => all.add(tag));
+    });
+    return Array.from(all).filter(Boolean);
+  }, [tasks, strategyTags]);
+
+  // --- 2. CALCULATE TAG OBJECTS FOR MANAGER (Fix: Syncs Dropdown with Manager) ---
+  // ส่วนนี้จะรวม Tag ที่เซฟไว้ในระบบ เข้ากับ Tag ที่ลอยอยู่ใน Task เพื่อให้หน้าจัดการ Tag เห็นครบทุกตัว
+  const tagsForStrategyManager = useMemo(() => {
+    // สร้าง Map ของ Tag ที่บันทึกไว้แล้ว (มีสี มีค่า config)
+    const savedMap = new Map(strategyTags.map(t => [t.name, t]));
+    
+    // วนลูปดู Tag ทั้งหมดที่มีบนกระดานตอนนี้ (ตัดคำว่า All ออก)
+    const mergedList = strategyBoardAllTags
+      .filter(t => t !== 'All') 
+      .map(tagName => {
+        // ถ้ามีใน Config ให้ใช้ค่า Config (จะได้สีที่ตั้งไว้)
+        if (savedMap.has(tagName)) {
+          return savedMap.get(tagName);
+        }
+        // ถ้าเป็น Tag ใหม่ที่เพิ่งพิมพ์ในงาน (เช่น Visual Storytelling) ให้สร้าง Object สีเทาตั้งต้น
+        return { name: tagName, color: '#64748b' }; 
+      });
+
+    return mergedList;
+  }, [strategyTags, strategyBoardAllTags]);
+
 
   // --- HELPER IN SCOPE ---
   const navigateTo = (tabId) => { 
@@ -485,26 +182,24 @@ export default function TeamTaweeApp() {
     setIsMobileMenuOpen(false); 
   };
 
-  // 🟢 ฟังก์ชันดึงข้อมูลใหม่ (Manual Fetch)
   const refreshData = async () => {
     if (!currentUser) return;
-    setIsDataLoading(true); // หมุนเล็กๆ
     try {
-        const [tasksSnap, plansSnap, mediaSnap, channelsSnap, linksSnap, settingsSnap] = await Promise.all([
-            getDocs(collection(db, "tasks")),
+        const [plansSnap, mediaSnap, channelsSnap, linksSnap, settingsSnap, strategySettingsSnap] = await Promise.all([
             getDocs(collection(db, "plans")),
             getDocs(collection(db, "media")),
             getDocs(collection(db, "channels")),
             getDocs(query(collection(db, "published_links"), orderBy("createdAt", "desc"))),
-            getDoc(doc(db, "settings", "news_config"))
+            getDoc(doc(db, "settings", "news_config")),
+            getDoc(doc(db, "settings", "strategy_config"))
         ]);
-
-        setTasks(tasksSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        
         setPlans(plansSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setMedia(mediaSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setChannels(channelsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setPublishedLinks(linksSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         if (settingsSnap.exists()) setSystemTags(settingsSnap.data().tags || []);
+        if (strategySettingsSnap.exists()) setStrategyTags(strategySettingsSnap.data().tags || []);
 
         if (userProfile?.role === 'Admin') {
             const usersSnap = await getDocs(collection(db, "user_profiles"));
@@ -532,12 +227,24 @@ export default function TeamTaweeApp() {
     return unsubscribe;
   }, []);
 
-  // เมื่อ Login เสร็จ หรือ Profile มาแล้ว ให้โหลดข้อมูล 1 ที
   useEffect(() => {
       if (currentUser) {
           refreshData();
       }
-  }, [currentUser, userProfile]); // เพิ่ม userProfile เพื่อให้ Admin โหลดข้อมูลเพิ่มได้
+  }, [currentUser, userProfile]);
+
+  useEffect(() => {
+    if (!currentUser) return; 
+    const q = query(collection(db, "tasks"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const liveTasks = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setTasks(liveTasks);
+    });
+    return () => unsubscribe();
+  }, [currentUser]); 
 
   const logActivity = async (action, details) => { try { await addDoc(collection(db, "logs"), { action, details, user: currentUser.displayName || currentUser.email, createdAt: serverTimestamp() }); } catch(e) {} };
   
@@ -548,7 +255,7 @@ export default function TeamTaweeApp() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [isSopOpen, setIsSopOpen] = useState(false); 
 
-  // --- ACTIONS (ต้อง refreshData หลังทำเสร็จ) ---
+  // --- ACTIONS ---
   const handleUpdateProfile = async (n, p, ph) => { if(!currentUser)return; setIsGlobalLoading(true); try{ await updateProfile(currentUser, {displayName:n, photoURL:p}); await setDoc(doc(db,"user_profiles",currentUser.uid), {phone:ph}, {merge:true}); setCurrentUser({...currentUser, displayName:n, photoURL:p}); setUserProfile(prev=>({...prev, phone:ph})); refreshData(); }catch(e){alert(e.message);} setIsGlobalLoading(false); };
   
   const openFormModal = (title, fields, onSave, submitText, additionalProps = {}) => 
@@ -560,7 +267,6 @@ export default function TeamTaweeApp() {
         await setDoc(doc(db, "settings", "news_config"), { tags: newTags }, { merge: true });
         if (renames && renames.length > 0) {
             const batch = writeBatch(db);
-            let batchCount = 0;
             for (const { oldName, newName } of renames) {
                 if (oldName === newName) continue;
                 const q = query(collection(db, "published_links"), where("tags", "array-contains", oldName));
@@ -570,23 +276,98 @@ export default function TeamTaweeApp() {
                     const updatedTags = (data.tags || []).map(t => t === oldName ? newName : t);
                     const docRef = doc(db, "published_links", docSnap.id);
                     batch.update(docRef, { tags: updatedTags });
-                    batchCount++;
                 });
             }
-            if (batchCount > 0) await batch.commit();
+            if (batch.count > 0) await batch.commit();
         }
         setIsTagManagerOpen(false);
-        refreshData(); // โหลดใหม่หลังแก้
+        refreshData();
     } catch (e) {
         alert("บันทึกไม่สำเร็จ: " + e.message);
     }
     setIsGlobalLoading(false);
   };
 
-  const saveTaskChange = async (task) => { if(!task.id)return; setIsGlobalLoading(true); try{ await updateDoc(doc(db,"tasks",task.id), {title:task.title||"", status:task.status||"To Do", tag:task.tag||"", role:task.role||"", link:task.link||"", deadline:task.deadline||"", updatedBy:currentUser.displayName, updatedAt:new Date().toISOString()}); logActivity("Edit Task", task.title); setEditingTask(null); refreshData(); }catch(e){alert(e.message);} setIsGlobalLoading(false); };
+  const saveStrategyTags = async (newTags, renames) => {
+    setIsGlobalLoading(true);
+    try {
+        // Save to Global Settings
+        await setDoc(doc(db, "settings", "strategy_config"), { tags: newTags }, { merge: true });
+        
+        // Handle Renames in Existing Tasks
+        if (renames && renames.length > 0) {
+            const batch = writeBatch(db);
+            for (const { oldName, newName } of renames) {
+                if (oldName === newName) continue;
+                const q = query(collection(db, "tasks"), where("tags", "array-contains", oldName));
+                const querySnapshot = await getDocs(q);
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    const updatedTags = (data.tags || []).map(t => t === oldName ? newName : t);
+                    batch.update(docSnap.ref, { tags: updatedTags, tag: updatedTags.join(', ') });
+                });
+            }
+            await batch.commit();
+        }
+        setIsStrategyTagManagerOpen(false);
+        setStrategyTags(newTags); // Update local state immediately
+    } catch (e) {
+        alert("บันทึก Tag ไม่สำเร็จ: " + e.message);
+    }
+    setIsGlobalLoading(false);
+  };
+
+  const saveTaskChange = async (task) => {
+    if (!task.id) return;
+    setIsGlobalLoading(true);
+    try {
+      const finalTags = (task.tags || []).filter(Boolean).map(t => t.trim());
+      const dataToUpdate = {
+        title: task.title || "",
+        status: task.status || "To Do",
+        tags: finalTags,
+        tag: finalTags.join(', '), // For legacy compatibility
+        role: task.role || "",
+        link: task.link || "",
+        deadline: task.deadline || "",
+        updatedBy: currentUser.displayName,
+        updatedAt: new Date().toISOString()
+      };
+      await updateDoc(doc(db, "tasks", task.id), dataToUpdate);
+      logActivity("Edit Task", task.title);
+      setEditingTask(null);
+    } catch (e) {
+      alert(e.message);
+    }
+    setIsGlobalLoading(false);
+  };
   const saveUrgentCase = async (task) => { if(!task.id)return; setIsGlobalLoading(true); try{ await updateDoc(doc(db,"tasks",task.id), {title:task.title||"", status:task.status||"To Do", link:task.link||"", sop:task.sop||[], updatedBy:currentUser.displayName, updatedAt:new Date().toISOString()}); logActivity("Update Urgent", task.title); setUrgentModal(null); refreshData(); }catch(e){alert(e.message);} setIsGlobalLoading(false); };
   
-  const addNewTask = (key) => openFormModal("เพิ่มงานใหม่", [{key:'title', label:'ชื่องาน'}, {key:'tag', label:'Tag'}, {key:'role', label:'ผู้รับผิดชอบ'}, {key:'status', label:'สถานะ', type:'select', options: TASK_STATUSES}, {key:'deadline', label:'กำหนดส่ง', type:'date'}, {key:'link', label:'Link ผลงาน'}], async(d)=>{ await addDoc(collection(db,"tasks"), {...d, status:d.status||"To Do", link:d.link||"", columnKey:key, createdBy:currentUser.displayName, createdAt:new Date().toISOString()}); logActivity("Add Task", d.title); refreshData(); });
+  // --- UPDATED ADD NEW TASK (With Dropdown) ---
+  const addNewTask = (key) => openFormModal("เพิ่มงานใหม่", [
+      {key:'title', label:'ชื่องาน'}, 
+      {key:'tags', label:'Tag', type:'multiselect-dropdown', options: strategyBoardAllTags.filter(t=>t!=='All'), defaultValue: []}, 
+      {key:'role', label:'ผู้รับผิดชอบ', defaultValue: currentUser.displayName}, 
+      {key:'status', label:'สถานะ', type:'select', options: TASK_STATUSES}, 
+      {key:'deadline', label:'กำหนดส่ง', type:'date'}, 
+      {key:'link', label:'Link ผลงาน'}
+    ], async(d)=>{ 
+      const tagsArray = d.tags || [];
+      await addDoc(collection(db,"tasks"), {
+          ...d, 
+          tags: tagsArray,
+          tag: tagsArray.join(', '),
+          role: d.role || currentUser.displayName, 
+          status:d.status||"To Do", 
+          link:d.link||"", 
+          columnKey:key, 
+          createdBy:currentUser.displayName, 
+          createdAt:new Date().toISOString()
+      }); 
+      logActivity("Add Task", d.title); 
+      refreshData(); 
+  }, "สร้างงาน", { availableTags: strategyBoardAllTags.filter(t=>t!=='All') });
+
   const addChannel = () => openFormModal("เพิ่มช่องทาง", [{key:'name', label:'ชื่อ'}, {key:'type', label:'ประเภท', type:'select', options: ASSET_TYPES, defaultValue:'Own media'}, {key:'url', label:'URL'}], async(d)=>{ await addDoc(collection(db,"channels"), {...d, count:0}); logActivity("Add Channel", d.name); refreshData(); });
   const updateChannel = (c) => openFormModal("แก้ไขช่องทาง", [{key:'name', label:'ชื่อ', defaultValue:c.name}, {key:'type', label:'ประเภท', type:'select', options: ASSET_TYPES, defaultValue:c.type}, {key:'url', label:'URL', defaultValue:c.url}], async(d)=>{ await updateDoc(doc(db,"channels",c.id), d); logActivity("Edit Channel", c.name); refreshData(); });
   const addMedia = () => openFormModal("เพิ่มสื่อ", [{key:'name', label:'ชื่อ'}, {key:'type', label:'ประเภท', type:'select', options: ASSET_TYPES, defaultValue:'NEWS Website'}, {key:'phone', label:'เบอร์'}, {key:'line', label:'Line'}], async(d)=>{ await addDoc(collection(db,"media"), {...d, active:true}); logActivity("Add Media", d.name); refreshData(); });
@@ -607,7 +388,7 @@ export default function TeamTaweeApp() {
       {key:'imageUrl', label:'Link รูปภาพ', defaultValue: defaults.imageUrl}, 
       {key:'customDate', label:'วันที่ลงข่าว', type:'datetime-local', defaultValue: defaults.customDate},
       {key:'platform', label:'Platform', type:'select', options: ['Website', 'Facebook', 'YouTube', 'TikTok', 'Twitter'], defaultValue: defaults.platform},
-      {key:'tags', label:'Tags (เพิ่ม/ลบ)', type:'tags', defaultValue: []} 
+      {key:'tags', label:'Tags', type:'multiselect-dropdown', options: systemTags, defaultValue: []} 
     ], async(d)=>{ 
       const finalDate = d.customDate ? new Date(d.customDate) : new Date();
       await addDoc(collection(db,"published_links"), { title: d.title.trim() || "No Title", url: d.url || "", imageUrl: d.imageUrl || "", platform: d.platform || "Website", tags: d.tags || [], createdBy:currentUser.displayName, createdAt: finalDate }); 
@@ -622,7 +403,7 @@ export default function TeamTaweeApp() {
     {key:'imageUrl', label:'Link รูปภาพ', defaultValue: link.imageUrl}, 
     {key:'customDate', label:'วันที่ลงข่าว', type:'datetime-local', defaultValue: formatForInput(link.createdAt)},
     {key:'platform', label:'Platform', type:'select', options: ['Website', 'Facebook', 'YouTube', 'TikTok', 'Twitter'], defaultValue: link.platform},
-    {key:'tags', label:'Tags', type:'tags', defaultValue: link.tags || []} 
+    {key:'tags', label:'Tags', type:'multiselect-dropdown', options: systemTags, defaultValue: link.tags || []} 
   ], async(d)=>{ 
     const newDate = d.customDate ? new Date(d.customDate) : null;
     await updateDoc(doc(db,"published_links",link.id), { ...d, tags: d.tags || [], createdAt: newDate || link.createdAt, updatedAt:serverTimestamp() }); 
@@ -648,58 +429,274 @@ export default function TeamTaweeApp() {
     return [...taskList].sort((a, b) => {
        const getDateValue = (item) => {
            if (item.deadline) return new Date(item.deadline).getTime();
-           if (item.createdAt) return item.createdAt.seconds ? item.createdAt.seconds * 1000 : new Date(item.createdAt).getTime();
            return 0;
        };
        const timeA = getDateValue(a);
        const timeB = getDateValue(b);
        if(sortOrder === 'newest') return timeB - timeA; 
        if(sortOrder === 'oldest') return timeA - timeB; 
-       if(sortOrder === 'deadline') {
-           if(!a.deadline && !b.deadline) return 0;
-           if(!a.deadline) return 1; 
-           if(!b.deadline) return -1;
-           return a.deadline.localeCompare(b.deadline); 
-       }
        return 0;
     });
   };
 
   const groupedTasks = { solver: sortTasks(tasks.filter(t => t.columnKey === 'solver')), principles: sortTasks(tasks.filter(t => t.columnKey === 'principles')), defender: sortTasks(tasks.filter(t => t.columnKey === 'defender')), expert: sortTasks(tasks.filter(t => t.columnKey === 'expert')), backoffice: sortTasks(tasks.filter(t => t.columnKey === 'backoffice')) };
   const urgentTasks = tasks.filter(t => t.tag === 'Urgent');
-  const allTags = ['All', ...new Set([...PRESET_TAGS, ...tasks.map(t => t.tag)].filter(Boolean))];
-
+  
   const navItems = [
     { id: 'dashboard', title: 'ภาพรวม', subtitle: 'Dashboard', icon: LayoutDashboard },
     { id: 'newsroom', title: 'ห้องข่าว & สื่อ', subtitle: 'Newsroom', icon: Globe, color: 'text-indigo-500' }, 
     { id: 'strategy', title: 'กระดาน 4 แกน', subtitle: 'Strategy', icon: Megaphone },
-    { id: 'masterplan', title: 'แผนงานหลัก', subtitle: 'Master Plan', icon: Map },
+    { id: 'masterplan', title: 'แผนงานหลัก', subtitle: 'Master Plan', icon: MapIcon }, // <-- ใช้ MapIcon ตรงนี้
     { id: 'rapidresponse', title: 'ปฏิบัติการด่วน', subtitle: 'Rapid Response', icon: Zap, color: 'text-red-500' },
     { id: 'assets', title: 'คลังข้อมูลสื่อ', subtitle: 'Media Assets', icon: Database },
   ];
   if(userProfile?.role === 'Admin') navItems.push({ id: 'admin', title: 'ผู้ดูแลระบบ', subtitle: 'Admin & Logs', icon: Shield });
+
+  const getInitials = (name) => {
+    if (!name) return '';
+    const parts = name.trim().split(' ').filter(Boolean);
+    if (parts.length === 0) return '';
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
 
   const renderDashboard = () => {
     const taskStats = { done: 0, doing: 0, waiting: 0, total: 0 };
     tasks.forEach(t => { if (t.status !== 'Canceled') { taskStats.total++; if (t.status === 'Done') taskStats.done++; else if (t.status === 'In Progress' || t.status === 'In Review') taskStats.doing++; else taskStats.waiting++; } });
     return (
       <div className="space-y-6 animate-fadeIn">
-        <PageHeader title="ภาพรวมสถานการณ์" subtitle="Overview & Statistics" action={<div className="flex gap-2"><button onClick={refreshData} className="p-2 bg-white border rounded-lg text-slate-500 hover:bg-slate-50 flex items-center gap-2 text-sm font-bold"><RefreshCw className={`w-4 h-4 ${isDataLoading?'animate-spin':''}`}/> อัปเดต</button><button onClick={() => setIsSearchOpen(true)} className="p-2 bg-white border rounded-lg text-slate-500 hover:bg-slate-50"><Search className="w-5 h-5"/></button><button onClick={() => addNewTask('solver')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700 transition-colors"> + งานทั่วไป </button><button onClick={createUrgentCase} className="bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-700 transition-colors"> แจ้งเหตุด่วน! </button></div>} />
+        <PageHeader title="ภาพรวมสถานการณ์" subtitle="Overview & Statistics" action={<div className="flex gap-2"><button onClick={() => setIsSearchOpen(true)} className="p-2 bg-white border rounded-lg text-slate-500 hover:bg-slate-50"><Search className="w-5 h-5"/></button><button onClick={() => addNewTask('solver')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700 transition-colors"> + งานทั่วไป </button><button onClick={addPublishedLink} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors"> เพิ่มข่าว </button></div>} />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center relative overflow-hidden"><p className="text-slate-500 text-xs font-bold uppercase mb-6 w-full text-left">Task Status</p><StatusDonutChart stats={taskStats} /><div className="flex justify-center gap-4 mt-6 text-[10px] font-bold w-full flex-wrap"><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div>เสร็จ ({taskStats.done})</div><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div>กำลังทำ ({taskStats.doing})</div><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-slate-300"></div>รอ ({taskStats.waiting})</div></div></div>
-          <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col"><h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-500"/> ความเคลื่อนไหวล่าสุด</h3><div className="space-y-3 overflow-y-auto max-h-[300px] custom-scrollbar pr-2">{tasks.sort((a,b) => (b.updatedAt?.seconds || b.createdAt?.seconds || 0) - (a.updatedAt?.seconds || a.createdAt?.seconds || 0)).slice(0, 10).map(t => (<div key={t.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-50 hover:bg-slate-50 transition cursor-pointer" onClick={() => setEditingTask(t)}><div className="flex items-center gap-3"><div className={`w-2 h-10 rounded-full ${t.status === 'Done' ? 'bg-emerald-500' : t.status === 'In Progress' ? 'bg-blue-500' : 'bg-slate-300'}`}></div><div><p className="font-bold text-sm text-slate-700 line-clamp-1">{t.title}</p><p className="text-[10px] text-slate-400 flex gap-2"><span>{t.role || 'ไม่ระบุผู้รับผิดชอบ'}</span><span>• {t.updatedAt ? formatDate(t.updatedAt) : 'New'}</span></p></div></div><StatusBadge status={t.status} /></div>))}</div></div>
+          <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-blue-500"/>
+                พรีวิว 4 แกน
+              </h3>
+              <button onClick={() => navigateTo('strategy')} className="text-sm text-blue-600 font-bold hover:underline">
+                ไปที่กระดาน &rarr;
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {['solver', 'principles', 'defender', 'expert'].map(key => (
+                <div key={key} className="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
+                  <h4 className="font-black text-slate-700 text-xs uppercase truncate mb-2">{COLUMN_LABELS[key]}</h4>
+                  <div className="space-y-2">
+                    {groupedTasks[key].slice(0, 3).map(task => (
+                      <div key={task.id} onClick={() => { const taskToEdit = {...task}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(t=>t.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }} className="bg-white p-2.5 rounded-md shadow-sm border border-slate-100 cursor-pointer hover:border-blue-400 transition-all group">
+                        <p className="text-xs font-bold text-slate-600 line-clamp-2 group-hover:text-blue-600">{task.title}</p>
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+                          <StatusBadge status={task.status} />
+                          <span className="text-[10px] text-slate-400 font-medium">{getInitials(task.role || task.createdBy)}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {groupedTasks[key].length === 0 && (
+                      <div className="flex flex-col items-center justify-center text-center py-4 bg-white rounded-md border border-slate-100">
+                          <p className="text-xs text-slate-400">ไม่มีงาน</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="pt-6 border-t border-slate-200"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Globe className="w-5 h-5 text-indigo-500"/> ข่าวประชาสัมพันธ์ล่าสุด</h3><button onClick={() => navigateTo('newsroom')} className="text-sm text-indigo-600 font-bold hover:underline"> ดูทั้งหมด &rarr;</button></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">{publishedLinks.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 4).map(link => (<a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group bg-white rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-400 hover:shadow-lg transition-all flex flex-col"><div className="aspect-video bg-slate-100 relative overflow-hidden">{link.imageUrl ? <img src={link.imageUrl} alt={link.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" /> : <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><FileText className="w-8 h-8 mb-1"/><span className="text-[10px]">No Image</span></div>}</div><div className="p-3 flex flex-col flex-1"><span className="text-[9px] font-bold text-indigo-500 uppercase mb-1">{link.platform || 'News'}</span><h4 className="font-bold text-slate-800 text-xs line-clamp-2 mb-2 group-hover:text-indigo-600 transition">{link.title}</h4><div className="text-[9px] text-slate-400 font-medium mb-2 flex items-center gap-1"><LinkIcon className="w-2.5 h-2.5" />{getDomain(link.url)}</div><div className="mt-auto flex items-center gap-1 text-[9px] text-slate-400"><Clock className="w-3 h-3"/> {link.createdAt ? formatDate(link.createdAt).split(' ')[0] : '-'}</div></div></a>))}</div></div>
-        {editingTask && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn"><div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative"><button onClick={() => setEditingTask(null)} className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400" /></button><h3 className="font-bold text-xl text-slate-800 mb-6">แก้ไขงาน</h3><div className="space-y-4"><input type="text" value={editingTask.title} onChange={e=>setEditingTask({...editingTask, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" /><div><input type="text" value={editingTask.tag} onChange={e=>setEditingTask({...editingTask, tag:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="Tag..." /><div className="mt-2 flex flex-wrap gap-2">{PRESET_TAGS.slice(0,5).map(t=><button key={t} onClick={()=>setEditingTask({...editingTask, tag:t})} className="text-[10px] bg-slate-100 px-2 py-1 rounded border hover:bg-blue-100">{t}</button>)}</div></div><input type="text" value={editingTask.role||""} onChange={e=>setEditingTask({...editingTask, role:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="ผู้รับผิดชอบ" /><div className="grid grid-cols-2 gap-4"><select value={editingTask.status} onChange={e=>setEditingTask({...editingTask, status:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm"><option>To Do</option><option>In Progress</option><option>In Review</option><option>Done</option><option>Idea</option><option>Waiting list</option><option>Canceled</option></select><input type="date" value={editingTask.deadline} onChange={e=>setEditingTask({...editingTask, deadline:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm" /></div><input type="text" value={editingTask.link} onChange={e=>setEditingTask({...editingTask, link:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="Link..." /><div className="flex justify-between pt-4"><button onClick={async()=>{if(confirm("ลบ?")){setIsGlobalLoading(true); await deleteDoc(doc(db,"tasks",editingTask.id)); logActivity("Delete Task", editingTask.title); setIsGlobalLoading(false); setEditingTask(null); refreshData(); }}} className="text-red-500 text-sm font-bold flex items-center gap-1"><Trash2 className="w-4 h-4"/> ลบ</button><button onClick={()=>saveTaskChange(editingTask)} className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow hover:bg-blue-700">บันทึก</button></div></div></div></div>}
+        
+        {urgentModal && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn"><div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative"><button onClick={() => setUrgentModal(null)} className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400" /></button><h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><AlertTriangle className="text-red-500"/> แก้ไขเคสด่วน</h3><div className="space-y-4"><input type="text" value={urgentModal.title} onChange={e=>setUrgentModal({...urgentModal, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" /><div className="flex gap-4"><select value={urgentModal.status} onChange={e=>setUrgentModal({...urgentModal, status:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm"><option>To Do</option><option>In Progress</option><option>In Review</option><option>Done</option><option>Canceled</option></select></div><div><p className="text-sm font-bold text-slate-600 mb-2">Checklist ความคืบหน้า</p><div className="space-y-2">{urgentModal.sop?.map((item, idx) => (<div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg"><label htmlFor={`sop-${idx}`} className="flex items-center gap-2 cursor-pointer"><input type="checkbox" id={`sop-${idx}`} checked={item.done} onChange={()=>{ const newSop = [...urgentModal.sop]; newSop[idx].done = !newSop[idx].done; setUrgentModal({...urgentModal, sop: newSop}); }} />{item.text}</label></div>))}</div></div><input type="text" value={urgentModal.link} onChange={e=>setUrgentModal({...urgentModal, link:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm" placeholder="Link ผลงาน" /></div><div className="mt-6 flex justify-end gap-3"><button onClick={() => setUrgentModal(null)} className="px-4 py-2 rounded-lg text-slate-600 border border-slate-300 hover:bg-slate-100">ยกเลิก</button><button onClick={() => saveUrgentCase(urgentModal)} className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700">บันทึก</button></div></div></div>}
       </div>
     );
   };
 
-  const renderStrategy = () => (<div className="h-full flex flex-col"><PageHeader title="กระดานยุทธศาสตร์ 4 แกน" subtitle="Strategy Board & Tasks" action={<div className="flex gap-3"><button onClick={refreshData} className="px-3 py-1.5 bg-white border rounded-lg text-slate-500 hover:bg-slate-50 flex items-center gap-2 text-sm font-bold"><RefreshCw className={`w-4 h-4 ${isDataLoading?'animate-spin':''}`}/> อัปเดต</button><div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200"><ArrowDownWideNarrow className="w-4 h-4 text-slate-500" /><select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="newest">ล่าสุด (Newest)</option><option value="oldest">เก่าสุด (Oldest)</option><option value="deadline">ใกล้กำหนดส่ง (Deadline)</option></select></div><div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200"><Filter className="w-4 h-4 text-slate-500" /><select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="All">All Tags</option>{allTags.filter(t=>t!=='All').map(tag => <option key={tag} value={tag}>{tag}</option>)}</select></div><button onClick={() => setHideDone(!hideDone)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition ${hideDone ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-300'}`}>{hideDone ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />} {hideDone ? "Show Done" : "Hide Done"}</button></div>} /><div className="overflow-x-auto pb-4 flex-1 custom-scrollbar"><div className="flex flex-col md:flex-row gap-4 min-w-full md:min-w-[1200px] h-full">{['solver', 'principles', 'defender', 'expert', 'backoffice'].map((key) => (<div key={key} className={`w-full md:w-1/5 bg-white rounded-2xl p-4 border border-slate-200 flex flex-col shadow-sm`}><div className="mb-3 pb-2 border-b border-slate-100"><h3 className="font-black text-slate-800 text-sm uppercase tracking-wide truncate">{COLUMN_LABELS[key]}</h3><p className="text-[10px] text-slate-500 line-clamp-1">{COL_DESCRIPTIONS[key]}</p></div><div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1 custom-scrollbar flex-1">{groupedTasks[key]?.filter(t => (!hideDone || t.status !== 'Done') && (filterTag === 'All' || t.tag === filterTag)).map(task => (<div key={task.id} onClick={() => setEditingTask(task)} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-100 hover:shadow-md hover:border-blue-400 transition-all cursor-pointer relative`}><div className="flex justify-between items-start mb-3"><span className={`text-[9px] font-bold uppercase text-blue-600 bg-blue-50 px-2 py-1 rounded-md`}>{task.tag}</span><StatusBadge status={task.status} /></div><h4 className="text-sm font-bold text-slate-800 mb-2 leading-snug">{task.title}</h4>{task.deadline && <div className="flex items-center gap-1.5 text-[10px] text-red-500 font-bold mt-3"><Clock className="w-3 h-3" /> {task.deadline}</div>}<div className="mt-2 pt-2 border-t border-slate-50 text-[9px] text-slate-400 flex flex-col gap-0.5"><span className="flex items-center gap-1"><User className="w-3 h-3" /> {task.role || task.createdBy}</span>{task.updatedBy && <span className="flex items-center gap-1 text-blue-400"><Edit2 className="w-3 h-3" /> {formatDate(task.updatedAt)}</span>}</div></div>))}<button onClick={() => addNewTask(key)} className="w-full py-3 text-sm text-slate-400 border-2 border-dashed border-slate-200 hover:border-blue-300 rounded-xl hover:bg-blue-50 transition-all flex items-center justify-center gap-2 font-bold"><Plus className="w-4 h-4" /> เพิ่มงาน</button></div></div>))}</div></div>{editingTask && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn"><div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative"><button onClick={() => setEditingTask(null)} className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400" /></button><h3 className="font-bold text-xl text-slate-800 mb-6">แก้ไขงาน</h3><div className="space-y-4"><input type="text" value={editingTask.title} onChange={e=>setEditingTask({...editingTask, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" /><div><input type="text" value={editingTask.tag} onChange={e=>setEditingTask({...editingTask, tag:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="Tag..." /><div className="mt-2 flex flex-wrap gap-2">{PRESET_TAGS.slice(0,5).map(t=><button key={t} onClick={()=>setEditingTask({...editingTask, tag:t})} className="text-[10px] bg-slate-100 px-2 py-1 rounded border hover:bg-blue-100">{t}</button>)}</div></div><input type="text" value={editingTask.role||""} onChange={e=>setEditingTask({...editingTask, role:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="ผู้รับผิดชอบ" /><div className="grid grid-cols-2 gap-4"><select value={editingTask.status} onChange={e=>setEditingTask({...editingTask, status:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm"><option>To Do</option><option>In Progress</option><option>In Review</option><option>Done</option><option>Idea</option><option>Waiting list</option><option>Canceled</option></select><input type="date" value={editingTask.deadline} onChange={e=>setEditingTask({...editingTask, deadline:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm" /></div><input type="text" value={editingTask.link} onChange={e=>setEditingTask({...editingTask, link:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="Link..." /><div className="flex justify-between pt-4"><button onClick={async()=>{if(confirm("ลบ?")){setIsGlobalLoading(true); await deleteDoc(doc(db,"tasks",editingTask.id)); logActivity("Delete Task", editingTask.title); setIsGlobalLoading(false); setEditingTask(null); refreshData(); }}} className="text-red-500 text-sm font-bold flex items-center gap-1"><Trash2 className="w-4 h-4"/> ลบ</button><button onClick={()=>saveTaskChange(editingTask)} className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow hover:bg-blue-700">บันทึก</button></div></div></div></div>}</div>);
-  
-  const renderMasterPlan = () => (<div className="space-y-6"><PageHeader title="แผนงานหลัก (Master Plan)" subtitle="Long-term Roadmap" action={<button onClick={addPlan} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition flex items-center gap-2"><Plus className="w-4 h-4" /> สร้างแผนใหม่</button>} /><div className="grid grid-cols-1 lg:grid-cols-2 gap-6">{plans.map((plan) => { const sortedItems = [...(plan.items || [])].map((item, idx) => ({ ...item, originalIndex: idx })).sort((a, b) => Number(a.completed) - Number(b.completed)); return (<div key={plan.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition"><div className="flex justify-between items-start mb-6"><div className="flex items-center gap-2 cursor-pointer" onClick={() => editPlanTitle(plan)}><h3 className="font-bold text-lg text-slate-800">{plan.title}</h3><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600" /></div><button onClick={async () => { if(confirm("ลบแผนนี้?")) { await deleteDoc(doc(db, "plans", plan.id)); logActivity("Delete Plan", plan.title); refreshData(); }}} className="text-slate-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></div><div className="mb-6"><div className="w-full bg-slate-100 rounded-full h-2.5"><div className="bg-blue-600 h-2.5 rounded-full transition-all duration-1000" style={{ width: `${plan.progress || 0}%` }}></div></div></div><ul className="space-y-1">{sortedItems.map((item, idx) => (<li key={idx} className={`flex items-center justify-between gap-3 text-sm p-2 rounded-lg hover:bg-slate-50 transition ${item.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => togglePlanItem(plan.id, item.originalIndex, plan.items)}>{item.completed ? <CheckCircle2 className="w-5 h-5 text-green-500" /> : <Circle className="w-5 h-5 text-slate-300" />}<span className={item.completed ? "line-through" : ""}>{item.text}</span></div><div className="flex gap-2 relative z-10"><button onClick={(e) => { e.stopPropagation(); editPlanItem(plan.id, item.originalIndex, plan.items); }}><Edit2 className="w-3.5 h-3.5 text-slate-400 hover:text-blue-600" /></button><button onClick={(e) => { e.stopPropagation(); removePlanItem(plan.id, item.originalIndex, plan.items); }}><Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-red-600" /></button></div></li>))}<li className="pt-2"><button onClick={() => openFormModal("เพิ่มรายการ", [{key:'text', label:'รายการ'}], async(d)=> { const newItems=[...(plan.items||[]), {text:d.text, completed:false}]; await updateDoc(doc(db,"plans",plan.id), {items:newItems, progress:Math.round((newItems.filter(i=>i.completed).length/newItems.length)*100)}); logActivity("Add Plan Item", d.text); refreshData(); })} className="w-full text-center text-xs text-blue-600 font-bold hover:bg-blue-50 py-2 rounded-lg transition border border-dashed border-blue-200">+ เพิ่มรายการ</button></li></ul></div>)})}</div></div>);
-  const renderRapidResponse = () => (<div className="space-y-6"><PageHeader title="ปฏิบัติการด่วน" subtitle="Agile Response Unit" action={<button onClick={createUrgentCase} className="bg-red-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-red-700 shadow-lg flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> เปิดเคสด่วน</button>} /><div className="flex flex-col lg:flex-row gap-6"><div className={`lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm h-fit overflow-hidden`}><div className="p-4 bg-slate-50 font-bold text-slate-800 flex items-center gap-2 cursor-pointer" onClick={()=>setIsSopOpen(!isSopOpen)}><FileText className="w-5 h-5"/> SOP Guide (คู่มือ) <ChevronDown className={`ml-auto transform ${isSopOpen?'rotate-180':''}`}/></div>{isSopOpen && <div className="p-6 space-y-3 text-sm text-slate-600">{SOP_GUIDE.map((s,i)=><p key={i}>{s}</p>)}</div>}</div><div className="lg:w-2/3 space-y-6"><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{urgentTasks.map(task => (<div key={task.id} className="bg-white p-5 rounded-2xl border-l-[6px] border-red-500 shadow-sm hover:shadow-md cursor-pointer" onClick={() => setUrgentModal(task)}><div className="flex justify-between mb-3"><span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded animate-pulse">URGENT</span><StatusBadge status={task.status} /></div><h3 className="font-bold text-slate-800 mb-3 text-lg">{task.title}</h3>{task.deadline && <p className="text-xs text-slate-500 mb-4 flex gap-1"><Clock className="w-3.5 h-3.5"/> {task.deadline}</p>}<div className="pt-3 border-t border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Progress Checklist</p><div className="flex gap-1.5 h-2">{(task.sop && task.sop.length > 0 ? task.sop : Array(5).fill({done:false})).map((s, i) => (<div key={i} className={`flex-1 rounded-full transition-all ${s.done ? 'bg-green-500 shadow-sm' : 'bg-slate-200'}`}></div>))}</div></div></div>))}</div><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mt-4"><h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">Quick Contacts</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{media.filter(c=>c.active).map((c,i)=><div key={i} className="p-4 border rounded-xl flex justify-between group"><div className="flex flex-col"><p className="font-bold text-sm">{c.name}</p><div className="text-xs text-slate-500 flex flex-col gap-1 mt-1"><span>📞 {c.phone}</span><span>LINE: {c.line}</span></div></div><button onClick={(e)=>{e.stopPropagation(); editMedia(c)}} className="text-slate-300 hover:text-blue-600"><Edit2 className="w-4 h-4"/></button></div>)}</div><button onClick={() => navigateTo('assets')} className="text-xs text-blue-600 font-bold hover:underline mt-4 block w-full text-center border-t border-slate-100 pt-3">ดูรายชื่อทั้งหมด</button></div></div></div>{urgentModal && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl w-full max-w-lg p-6 relative"><button onClick={()=>setUrgentModal(null)} className="absolute top-4 right-4"><X className="w-6 h-6 text-slate-400"/></button><h3 className="text-xl font-bold text-red-600 mb-6">จัดการเคสด่วน</h3><div className="space-y-4"><input type="text" value={urgentModal.title} onChange={e=>setUrgentModal({...urgentModal, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-xl p-3 font-bold" /><div className="bg-slate-50 p-4 rounded-xl border"><h4 className="font-bold mb-3">Checklist</h4>{(urgentModal.sop || DEFAULT_SOP).map((s,i)=><div key={i} className="flex gap-3 p-2 cursor-pointer" onClick={()=>{const newSop=[...(urgentModal.sop || DEFAULT_SOP)]; newSop[i] = { ...newSop[i], done: !newSop[i].done }; setUrgentModal({...urgentModal, sop:newSop})}}><div className={`w-5 h-5 rounded border flex items-center justify-center ${s.done?'bg-green-500 text-white':'bg-white'}`}>{s.done&&<CheckCircle2 className="w-3.5 h-3.5"/>}</div><span className={s.done?'line-through text-slate-400':''}>{s.text}</span></div>)}</div><div className="flex justify-between mt-6"><button onClick={async()=>{if(confirm("ปิดเคส?")){await deleteDoc(doc(db,"tasks",urgentModal.id)); logActivity("Close Case", urgentModal.title); setUrgentModal(null); refreshData(); }}} className="text-red-500 font-bold">ลบเคส</button><button onClick={()=>saveUrgentCase(urgentModal)} className="bg-red-600 text-white px-6 py-2 rounded-lg font-bold">บันทึก</button></div></div></div></div>}</div>);
-  const renderAssets = () => (<div className="space-y-6"><PageHeader title="คลังข้อมูลสื่อ" subtitle="Media Assets" /><div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 rounded-2xl shadow-lg text-white flex justify-between items-center"><div><h3 className="text-2xl font-black mb-2">Google Drive</h3><p className="text-blue-100">พื้นที่เก็บไฟล์ต้นฉบับ</p></div><a href="https://drive.google.com/drive/folders/0AHTNNQ96Wgq-Uk9PVA" target="_blank" rel="noreferrer" className="bg-white text-blue-700 px-6 py-3 rounded-xl font-bold shadow-xl flex items-center gap-2"><ExternalLink className="w-5 h-5"/> เปิด Drive</a></div><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><div className="flex justify-between mb-6"><h3 className="font-bold text-lg">Channels</h3><button onClick={addChannel} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button></div><div className="space-y-3">{channels.map(c=><div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md cursor-pointer" onClick={()=>updateChannel(c)}><div><p className="font-bold text-slate-700">{c.name}</p><span className="text-xs bg-slate-100 px-2 py-0.5 rounded">{c.type}</span></div><button onClick={(e)=>{e.stopPropagation(); deleteChannel(c.id)}}><Trash2 className="w-5 h-5 text-slate-300 hover:text-red-500"/></button></div>)}</div></div><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><div className="flex justify-between mb-6"><h3 className="font-bold text-lg">Media List</h3><button onClick={addMedia} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button></div><div className="space-y-3 overflow-y-auto max-h-[500px]">{media.map(c=><div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md"><div><p className="font-bold text-slate-700">{c.name}</p><div className="text-xs text-slate-500 mt-1 flex gap-2"><span>📞 {c.phone}</span><span>LINE: {c.line}</span></div></div><div className="flex gap-2"><button onClick={()=>editMedia(c)}><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600"/></button><button onClick={()=>deleteMedia(c.id)}><Trash2 className="w-4 h-4 text-slate-300 hover:text-red-500"/></button></div></div>)}</div></div></div></div>);
+  const renderStrategy = () => {
+      return (
+        <div className="h-full flex flex-col">
+          <PageHeader title="กระดานยุทธศาสตร์ 4 แกน" subtitle="Strategy Board & Tasks" action={<div className="flex flex-wrap gap-3"><div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200"><ArrowDownWideNarrow className="w-4 h-4 text-slate-500" /><select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="newest">ล่าสุด (Newest)</option><option value="oldest">เก่าสุด (Oldest)</option></select></div><div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200"><Filter className="w-4 h-4 text-slate-500" /><select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="All">All Tags</option>{strategyBoardAllTags.filter(t=>t!=='All').map(tag => <option key={tag} value={tag}>{tag}</option>)}</select></div><button onClick={() => setHideDone(!hideDone)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition ${hideDone ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-300'}`}>{hideDone ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />} {hideDone ? "Show Done" : "Hide Done"}</button><button onClick={() => setIsStrategyTagManagerOpen(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition bg-slate-800 text-white hover:bg-black border-slate-600"><Tag className="w-4 h-4" /> จัดการ Tag</button></div>} />
+          <div className="overflow-x-auto pb-4 flex-1 custom-scrollbar">
+            <div className="flex flex-col md:flex-row gap-4 min-w-full md:min-w-[1200px] h-full">
+              {['solver', 'principles', 'defender', 'expert', 'backoffice'].map((key) => {
+                const filteredAndSorted = groupedTasks[key].filter(t => {
+                  const taskTags = Array.isArray(t.tags) && t.tags.length > 0 ? t.tags : (t.tag ? t.tag.split(',').map(s=>s.trim()).filter(Boolean) : []);
+                  const matchesTag = filterTag === 'All' || taskTags.includes(filterTag);
+                  const isDone = t.status === 'Done';
+                  return matchesTag && (!hideDone || !isDone);
+                });
+
+                return (
+                  <div key={key} className={`w-full md:w-1/5 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col h-full`}>
+                    <div className="flex justify-between items-center mb-4">
+                      <div className="w-full">
+                        <h3 className="font-black text-slate-800 text-sm uppercase flex items-center">{COLUMN_LABELS[key]}<span className="ml-2 text-xs bg-slate-200 text-slate-600 font-bold w-6 h-6 flex items-center justify-center rounded-full">{filteredAndSorted.length}</span></h3>
+                        <p className="text-[11px] text-slate-400 mt-1">{COL_DESCRIPTIONS[key]}</p>
+                      </div>
+                      <button onClick={() => addNewTask(key)} className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-600 hover:text-white transition"><Plus className="w-5 h-5"/></button>
+                    </div>
+                    <div className="space-y-3 overflow-y-auto flex-1 -mr-2 pr-2 custom-scrollbar">
+                      {filteredAndSorted.map(task => {
+                        const taskTags = Array.isArray(task.tags) ? task.tags : (task.tag ? task.tag.split(',').map(s=>s.trim()).filter(Boolean) : []);
+                        return (
+                          <div key={task.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-500 hover:shadow-md transition-all group relative">
+                            <div className="flex justify-between items-start" onClick={() => { const taskToEdit = {...task}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(t=>t.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }}>
+                              <p className="text-sm font-bold text-slate-800 line-clamp-3 pr-4 group-hover:text-blue-700">{task.title}</p>
+                              <StatusBadge status={task.status} />
+                            </div>
+                            {taskTags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {taskTags.map(t => (
+                                  <span key={t} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-medium">{t}</span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex items-end justify-between mt-3 pt-3 border-t border-slate-100">
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+  {task.deadline && (
+    <div className="flex items-center gap-1">
+      <Clock className="w-3.5 h-3.5"/>
+      <span>
+        {new Date(task.deadline).toLocaleDateString('th-TH', {
+          day: 'numeric',
+          month: 'short',
+          year: '2-digit'
+        })}
+      </span>
+    </div>
+  )}
+</div>
+                              <div className="flex items-center gap-1">
+                                <button onClick={(e) => { e.stopPropagation(); const taskToEdit = {...task}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(t=>t.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }} className="text-slate-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Edit2 className="w-4 h-4" />
+                                </button>
+                                <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs border-2 border-white shadow-sm font-bold">{getInitials(task.role || task.createdBy)}</div>
+                              </div>
+                            </div>
+                            {task.link && <a href={task.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="absolute top-2 right-2 p-1 rounded-full bg-slate-100 text-slate-500 opacity-0 group-hover:opacity-100 transition hover:bg-blue-100"><LinkIcon className="w-3.5 h-3.5"/></a>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    };
+   
+  const renderMasterPlan = () => (<div className="space-y-6"><PageHeader title="แผนงานหลัก (Master Plan)" subtitle="Long-term Roadmap" action={<button onClick={addPlan} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition flex items-center gap-2"><Plus className="w-4 h-4" /> สร้างแผนใหม่</button>} /><div className="grid grid-cols-1 lg:grid-cols-2 gap-6">{plans.map((plan) => { const sortedItems = [...(plan.items || [])].map((item, idx) => ({ ...item, originalIndex: idx })).sort((a, b) => Number(a.completed) - Number(b.completed)); return (<div key={plan.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition"><div className="flex justify-between items-start mb-6"><div className="flex items-center gap-2 cursor-pointer" onClick={() => editPlanTitle(plan)}><h3 className="font-bold text-lg text-slate-800">{plan.title}</h3><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600" /></div><button onClick={async () => { if(confirm("ลบแผนนี้?")) { await deleteDoc(doc(db, "plans", plan.id)); logActivity("Delete Plan", plan.title); refreshData(); }}} className="text-slate-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></div><div className="mb-6"><div className="w-full bg-slate-100 rounded-full h-2.5"><div className="bg-blue-600 h-2.5 rounded-full transition-all duration-1000" style={{ width: `${plan.progress || 0}%` }}></div></div></div><ul className="space-y-1">{sortedItems.map((item) => (<li key={item.originalIndex} className={`flex items-center justify-between gap-3 text-sm p-2 rounded-lg hover:bg-slate-50 transition ${item.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => togglePlanItem(plan.id, item.originalIndex, plan.items)}>{item.completed ? <CheckCircle2 className="w-5 h-5 text-green-500" /> : <Circle className="w-5 h-5 text-slate-300" />}<span className={item.completed ? "line-through" : ""}>{item.text}</span></div><div className="flex items-center gap-2"><button onClick={() => editPlanItem(plan.id, item.originalIndex, plan.items)}><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600"/></button><button onClick={() => removePlanItem(plan.id, item.originalIndex, plan.items)}><Trash2 className="w-4 h-4 text-slate-300 hover:text-red-600"/></button></div></li>))}</ul><div className="mt-4"><button onClick={() => openFormModal("เพิ่มรายการ", [{key:'text', label:'ข้อความ'}], async(d) => { const newItems = [...(plan.items || []), {text: d.text, completed: false}]; const p = Math.round((newItems.filter(i=>i.completed).length/newItems.length)*100); await updateDoc(doc(db, "plans", plan.id), {items: newItems, progress: p}); refreshData(); })} className="w-full text-center py-2 bg-slate-50 rounded-lg text-slate-600 hover:bg-slate-100 transition text-sm">+ เพิ่มรายการ</button></div></div>); })}</div></div>);
+
+  const renderRapidResponse = () => (
+    <div className="space-y-6">
+      <PageHeader title="ปฏิบัติการด่วน" subtitle="Agile Response Unit" action={<button onClick={createUrgentCase} className="bg-red-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-red-700 shadow-lg flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> เปิดเคสด่วน</button>} />
+      <div className="flex flex-col lg:flex-row gap-6">
+        <div className={`lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm h-fit overflow-hidden`}>
+          <div className="p-4 bg-slate-50 font-bold text-slate-800 flex items-center gap-2 cursor-pointer" onClick={()=>setIsSopOpen(!isSopOpen)}>
+            <FileText className="w-5 h-5"/> SOP Guide (คู่มือ) <ChevronDown className={`ml-auto transform ${isSopOpen?'rotate-180':''}`}/>
+          </div>
+          {isSopOpen && <div className="p-6 space-y-3 text-sm text-slate-600">{SOP_GUIDE.map((s,i)=><p key={i}>{s}</p>)}</div>}
+        </div>
+        <div className="lg:w-2/3 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {urgentTasks.map(task => (
+              <div key={task.id} className="bg-white p-5 rounded-2xl border-l-[6px] border-red-500 shadow-sm hover:shadow-md cursor-pointer" onClick={() => setUrgentModal(task)}>
+                <div className="flex justify-between mb-3">
+                  <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded animate-pulse">URGENT</span>
+                  <StatusBadge status={task.status} />
+                </div>
+                <h3 className="font-bold text-slate-800 mb-3 text-lg">{task.title}</h3>
+                {task.deadline && <p className="text-xs text-slate-500 mb-4 flex gap-1"><Clock className="w-3.5 h-3.5"/> {task.deadline}</p>}
+                <div className="pt-3 border-t border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Progress Checklist</p>
+                  <div className="flex gap-1.5 h-2">
+                    {(task.sop && task.sop.length > 0 ? task.sop : Array(5).fill({done:false})).map((s, i) => (
+                      <div key={i} className={`flex-1 rounded-full transition-all ${s.done ? 'bg-green-500 shadow-sm' : 'bg-slate-200'}`}></div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h3 className="font-bold mb-4">Backoffice (งานสนับสนุน)</h3>
+            <div className="space-y-2">
+              {groupedTasks.backoffice.map(t=>(
+                <div key={t.id} onClick={() => { const taskToEdit = {...t}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(tag=>tag.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }} className="flex justify-between items-center p-3 border rounded-lg hover:bg-slate-50 cursor-pointer">
+                  <div>
+                    <p className="font-bold">{t.title}</p>
+                    <p className="text-xs text-slate-500">{t.role}</p>
+                  </div>
+                  <StatusBadge status={t.status}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAssets = () => (
+    <div className="space-y-6">
+      <PageHeader title="คลังข้อมูลสื่อ" subtitle="Media Assets" />
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 rounded-2xl shadow-lg text-white flex justify-between items-center">
+        <div>
+          <h3 className="text-2xl font-black mb-2">Google Drive</h3>
+          <p className="text-blue-100">พื้นที่เก็บไฟล์ต้นฉบับ</p>
+        </div>
+        <a href="https://drive.google.com/drive/folders/0AHTNNQ96Wgq-Uk9PVA" target="_blank" rel="noreferrer" className="bg-white text-blue-700 px-6 py-3 rounded-xl font-bold shadow-xl flex items-center gap-2">
+          <ExternalLink className="w-5 h-5"/> เปิด Drive
+        </a>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex justify-between mb-6">
+            <h3 className="font-bold text-lg">Channels</h3>
+            <button onClick={addChannel} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button>
+          </div>
+          <div className="space-y-3">
+            {channels.map(c => (
+              <div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md cursor-pointer" onClick={() => updateChannel(c)}>
+                <div>
+                  <p className="font-bold text-slate-700">{c.name}</p>
+                  <span className="text-xs bg-slate-100 px-2 py-0.5 rounded">{c.type}</span>
+                </div>
+                <button onClick={(e) => {e.stopPropagation(); deleteChannel(c.id)}}>
+                  <Trash2 className="w-5 h-5 text-slate-300 hover:text-red-500"/>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex justify-between mb-6">
+            <h3 className="font-bold text-lg">Media List</h3>
+            <button onClick={addMedia} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button>
+          </div>
+          <div className="space-y-3 overflow-y-auto max-h-[500px]">
+            {media.map(c => (
+              <div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md">
+                <div onClick={() => editMedia(c)} className="flex-1 cursor-pointer">
+                  <p className="font-bold text-slate-700">{c.name}</p>
+                  <div className="text-xs text-slate-500 mt-1 flex gap-4">
+                    <span>{c.type}</span>
+                    <span>{c.phone}</span>
+                    <span>{c.line}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={(e) => {e.stopPropagation(); deleteMedia(c.id)}}>
+                    <Trash2 className="w-5 h-5 text-slate-300 hover:text-red-500"/>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderNewsroom = () => {
     const usedTags = new Set(publishedLinks.flatMap(link => link.tags || []));
@@ -792,7 +789,16 @@ export default function TeamTaweeApp() {
                             <div className="flex justify-between items-start mb-2"><span className="bg-blue-50 text-blue-600 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">{link.platform || 'News'}</span><div className="flex gap-2 opacity-0 group-hover:opacity-100 transition"><button onClick={() => editPublishedLink(link)} className="text-slate-300 hover:text-blue-500"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={() => deleteLink(link.id)} className="text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button></div></div>
                             <a href={link.url} target="_blank" rel="noreferrer" className="font-bold text-slate-800 text-sm leading-snug line-clamp-2 hover:text-blue-600 transition mb-2">{link.title}</a>
                             <div className="text-[10px] text-slate-400 font-medium mb-3 flex items-center gap-1"><LinkIcon className="w-3 h-3" />{getDomain(link.url)}</div>
-                            <div className="mt-auto pt-3 border-t border-slate-50 flex justify-between items-center text-[10px] text-slate-400"><span>{formatDate(link.createdAt)}</span></div>
+                            <div className="mt-auto pt-3 border-t border-slate-50 flex justify-between items-center text-[10px] text-slate-400"><span>
+  {link.createdAt ? (link.createdAt.toDate ? link.createdAt.toDate() : new Date(link.createdAt)).toLocaleString('th-TH', {
+    day: 'numeric',
+    month: 'short',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }) + ' น.' : '-'}
+</span></div>
                           </div>
                         </div>
                       ))}
@@ -871,9 +877,59 @@ export default function TeamTaweeApp() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 flex flex-col md:flex-row">
       <LoadingOverlay isOpen={isGlobalLoading} />
+      
+      {/* --- MOVED MODAL TO ROOT LEVEL --- */}
+      {editingTask && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+            <button onClick={() => setEditingTask(null)} className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded-full">
+              <X className="w-5 h-5 text-slate-400" />
+            </button>
+            <h3 className="font-bold text-xl text-slate-800 mb-6">แก้ไขงาน</h3>
+            <div className="space-y-4">
+              <input type="text" value={editingTask.title} onChange={e=>setEditingTask({...editingTask, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="ชื่องาน" />
+              
+              <MultiTagSelector 
+                availableTags={strategyBoardAllTags.filter(t => t !== 'All')}
+                selectedTags={editingTask.tags || (editingTask.tag ? editingTask.tag.split(',').map(t=>t.trim()).filter(Boolean) : [])}
+                onTagsChange={(newTags) => {
+                  setEditingTask({...editingTask, tags: newTags, tag: newTags.join(', ') });
+                }}
+              />
+              
+              <input type="text" value={editingTask.role||""} onChange={e=>setEditingTask({...editingTask, role:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="ผู้รับผิดชอบ" />
+              <div className="grid grid-cols-2 gap-4">
+                <select value={editingTask.status} onChange={e=>setEditingTask({...editingTask, status:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm">
+                  {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <input type="date" value={editingTask.deadline} onChange={e=>setEditingTask({...editingTask, deadline:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm" />
+              </div>
+              <input type="text" value={editingTask.link} onChange={e=>setEditingTask({...editingTask, link:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm" placeholder="Link ผลงาน" />
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setEditingTask(null)} className="px-4 py-2 rounded-lg text-slate-600 border border-slate-300 hover:bg-slate-100">ยกเลิก</button>
+              <button onClick={() => saveTaskChange(editingTask)} className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700">บันทึก</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <FormModal {...formModalConfig} onClose={() => setFormModalConfig(prev => ({ ...prev, isOpen: false }))} />
       <SearchModal isOpen={isSearchOpen} onClose={()=>setIsSearchOpen(false)} data={{tasks, media, channels}} onNavigate={navigateTo} />
       <ProfileModal isOpen={showProfileModal} onClose={() => setShowProfileModal(false)} user={currentUser} userProfile={userProfile} onUpdate={handleUpdateProfile} />
+      
+      {/* --- UPDATED TAG MANAGER ---
+         ตอนนี้ส่ง tagsForStrategyManager เข้าไปแทน strategyTags เดิม
+         ทำให้เห็น Tag ครบถ้วนตามหน้ากระดาน 
+      */}
+      <TagManagerModal 
+        isOpen={isStrategyTagManagerOpen} 
+        onClose={() => setIsStrategyTagManagerOpen(false)} 
+        existingTags={tagsForStrategyManager} 
+        onSave={saveStrategyTags}
+        title="จัดการ Tag (กระดาน 4 แกน)"
+      />
+
       <aside className={`bg-slate-900 text-white w-full md:w-64 flex-shrink-0 transition-all duration-300 fixed md:sticky top-0 z-30 h-screen ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} flex flex-col`}>
         <div className="p-6 border-b border-slate-700 flex justify-between items-center"><div><h1 className="text-xl font-black tracking-wider text-white">TEAM TAWEE</h1><p className="text-[10px] text-blue-400 font-bold tracking-widest uppercase mt-1">Stand Together</p></div><button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400"><X /></button></div>
         <nav className="p-4 space-y-2 overflow-y-auto flex-1">{navItems.map(item => (<button key={item.id} onClick={() => navigateTo(item.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 text-left ${activeTab === item.id ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><item.icon className={`w-5 h-5 flex-shrink-0 ${item.color || ''}`} /><div className="flex flex-col"><span className="font-bold text-sm leading-tight">{item.title}</span><span className="text-[10px] opacity-80 font-medium">({item.subtitle})</span></div></button>))}</nav>
