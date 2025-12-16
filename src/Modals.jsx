@@ -165,7 +165,7 @@ export const FormModal = ({ isOpen, onClose, title, fields, onSave, submitText =
         <div className="space-y-5">
            {fields.map((field) => (
              <div key={field.key}>
-                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase flex items-center gap-2">{field.label}</label>
+                <label className="text-xs font-bold text-slate-500 mb-1.5 uppercase flex items-center gap-2">{field.label}</label>
                 
                 {/* กรณี Multi-select Dropdown */}
                 {field.type === 'multiselect-dropdown' ? (
