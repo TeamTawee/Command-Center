@@ -19,8 +19,6 @@ import { TagManagerModal, SearchModal, FormModal, ProfileModal } from './Modals.
 import { formatDate, getWeekNumber, getDomain, formatForInput, fetchLinkMetadata } from './utils.js';
 import { PRESET_TAGS, ASSET_TYPES, TASK_STATUSES, DEFAULT_SOP, SOP_GUIDE, COLUMN_LABELS, COL_DESCRIPTIONS } from './constants.js';
 
-// --- แก้ไขส่วนนี้ (บรรทัดประมาณ 25) ---
-
 // ตั้งค่า URL ของ API Web Reader ของคุณ
 const API_URL = "https://web-reader-pdf-api.onrender.com/api/scrape"; 
 
@@ -38,18 +36,12 @@ const openPDFService = (linkData) => {
         }
     }
 
-    // 2. เตรียมหัวข้อข่าว (Title)
-    const titleParam = linkData.title || "Document";
-
-    // 3. สร้าง Query Parameters (นี่คือการส่งค่าแบบที่ต้องการ)
-    const params = new URLSearchParams({
-        url: linkData.url,     // ลิงก์ข่าว
-        date: dateParam,       // วันที่จากระบบเรา (Override)
-        title: titleParam      // ชื่อไฟล์จากระบบเรา (Override)
-    });
-
-    // 4. เปิด Tab ใหม่เพื่อดาวน์โหลด (ยิงไปหา V13 API)
-    window.open(`${PDF_SERVICE_BASE_URL}?${params.toString()}`, '_blank');
+    // 🚨 2. ส่วนสำคัญที่ต้องเพิ่ม/แก้ไข: สร้าง Full URL และเปิดหน้าต่าง
+    // (ส่วนนี้เคยเป็นที่ที่โค้ดเก่าเรียกใช้ PDF_SERVICE_BASE_URL)
+    const fullApiUrl = `${API_URL}?url=${encodeURIComponent(linkData.url)}&date=${dateParam}&title=${encodeURIComponent(linkData.title || '')}`;
+    
+    // 3. เปิดหน้าต่างใหม่เพื่อดาวน์โหลด PDF
+    window.open(fullApiUrl, '_blank');
 };
 
 // --- Multi-select Tag Component ---
