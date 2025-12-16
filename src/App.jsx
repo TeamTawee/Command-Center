@@ -21,8 +21,8 @@ import { PRESET_TAGS, ASSET_TYPES, TASK_STATUSES, DEFAULT_SOP, SOP_GUIDE, COLUMN
 
 // --- แก้ไขส่วนนี้ (บรรทัดประมาณ 25) ---
 
-// ตั้งค่า URL ของ API Web Reader ของคุณ (ถ้าขึ้น Vercel แล้วให้ใส่ Link Vercel)
-const PDF_SERVICE_BASE_URL = "https://cmd-pdf-final.vercel.app/api/scrape"; 
+// ตั้งค่า URL ของ API Web Reader ของคุณ
+const API_URL = "https://web-reader-pdf-api.onrender.com/api/scrape"; 
 
 // ฟังก์ชันใหม่: ส่งข้อมูล Date และ Title จาก Database เราเอง ไปให้ระบบสร้าง PDF (V13 Logic)
 const openPDFService = (linkData) => {
