@@ -16,7 +16,13 @@ export const LoginScreen = () => {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
-      // เช็คว่ามีข้อมูล User ใน Firestore หรือยัง ถ้าไม่มีให้สร้างใหม่
+      // 1. ตรวจสอบ Domain
+      if (!user.email.endsWith('@fufonglabs.com')) {
+        await auth.signOut(); // ล้าง Session ทิ้งทันที
+        throw new Error("อนุญาตเฉพาะอีเมล @fufonglabs.com เท่านั้น");
+      }
+      
+      // 2. ถ้าผ่านเงื่อนไข ให้ทำ logic เดิมต่อ
       const docRef = doc(db, "user_profiles", user.uid);
       const docSnap = await getDoc(docRef);
       
@@ -32,7 +38,9 @@ export const LoginScreen = () => {
         }); 
       }
     } catch (err) { 
-      setError("เข้าสู่ระบบไม่สำเร็จ: " + err.message); 
+      // จัดการ Error Message ให้สวยงามขึ้น ตัดคำว่า Firebase: ออกถ้ามี
+      const errorMessage = err.message.replace("Firebase: ", "");
+      setError("เข้าสู่ระบบไม่สำเร็จ: " + errorMessage); 
     }
     setLoading(false);
   };
