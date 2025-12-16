@@ -19,12 +19,37 @@ import { TagManagerModal, SearchModal, FormModal, ProfileModal } from './Modals.
 import { formatDate, getWeekNumber, getDomain, formatForInput, fetchLinkMetadata } from './utils.js';
 import { PRESET_TAGS, ASSET_TYPES, TASK_STATUSES, DEFAULT_SOP, SOP_GUIDE, COLUMN_LABELS, COL_DESCRIPTIONS } from './constants.js';
 
-// ฟังก์ชั่นใหม่: ส่งไปหน้า PrintFriendly เพื่อทำ PDF จากหน้าเว็บจริง
+// --- แก้ไขส่วนนี้ (บรรทัดประมาณ 25) ---
+
+// ตั้งค่า URL ของ API Web Reader ของคุณ (ถ้าขึ้น Vercel แล้วให้ใส่ Link Vercel)
+const PDF_SERVICE_BASE_URL = "https://web-reader-sodsong.vercel.app/api/scrape"; 
+
+// ฟังก์ชันใหม่: ส่งข้อมูล Date และ Title จาก Database เราเอง ไปให้ระบบสร้าง PDF (V13 Logic)
 const openPDFService = (linkData) => {
     if (!linkData.url) return alert("ไม่พบ URL ของข่าวนี้");
-    const encodedUrl = encodeURIComponent(linkData.url);
-    // เปิด Tab ใหม่ไปที่ PrintFriendly
-    window.open(`https://www.printfriendly.com/print?url=${encodedUrl}`, '_blank');
+
+    // 1. ดึงวันที่จาก Database (เอาให้ชัวร์ว่าเป็น YYYY-MM-DD)
+    let dateParam = "";
+    if (linkData.createdAt) {
+        // เช็คว่าเป็น Firestore Timestamp หรือ Date String ปกติ
+        const dateObj = linkData.createdAt.toDate ? linkData.createdAt.toDate() : new Date(linkData.createdAt);
+        if (!isNaN(dateObj)) {
+            dateParam = dateObj.toISOString().split('T')[0]; // ได้ค่า '2025-12-15'
+        }
+    }
+
+    // 2. เตรียมหัวข้อข่าว (Title)
+    const titleParam = linkData.title || "Document";
+
+    // 3. สร้าง Query Parameters (นี่คือการส่งค่าแบบที่ต้องการ)
+    const params = new URLSearchParams({
+        url: linkData.url,     // ลิงก์ข่าว
+        date: dateParam,       // วันที่จากระบบเรา (Override)
+        title: titleParam      // ชื่อไฟล์จากระบบเรา (Override)
+    });
+
+    // 4. เปิด Tab ใหม่เพื่อดาวน์โหลด (ยิงไปหา V13 API)
+    window.open(`${PDF_SERVICE_BASE_URL}?${params.toString()}`, '_blank');
 };
 
 // --- Multi-select Tag Component ---
