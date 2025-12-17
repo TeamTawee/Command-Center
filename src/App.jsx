@@ -26,21 +26,21 @@ const API_URL = "https://web-reader-service-952362075670.asia-southeast1.run.app
 const openPDFService = (linkData) => {
     if (!linkData.url) return alert("ไม่พบ URL ของข่าวนี้");
 
-    // 1. ดึงวันที่จาก Database (เอาให้ชัวร์ว่าเป็น YYYY-MM-DD)
+    // 1. ส่วนเตรียมวันที่ (Date)
+    // ตรงนี้ระบบพยายามดึง createdAt จาก Database มาแปลงเป็นปี-เดือน-วัน (YYYY-MM-DD)
     let dateParam = "";
     if (linkData.createdAt) {
-        // เช็คว่าเป็น Firestore Timestamp หรือ Date String ปกติ
         const dateObj = linkData.createdAt.toDate ? linkData.createdAt.toDate() : new Date(linkData.createdAt);
         if (!isNaN(dateObj)) {
             dateParam = dateObj.toISOString().split('T')[0]; // ได้ค่า '2025-12-15'
         }
     }
 
-    // 🚨 2. ส่วนสำคัญที่ต้องเพิ่ม/แก้ไข: สร้าง Full URL และเปิดหน้าต่าง
-    // (ส่วนนี้เคยเป็นที่ที่โค้ดเก่าเรียกใช้ PDF_SERVICE_BASE_URL)
+    // 🚨 2. จุดสำคัญ: ตรงนี้คือการส่งค่าออกไป (บรรทัดที่ 48)
+    // รูปแบบคือ: API_URL + ?url=... &date=... &title=...
     const fullApiUrl = `${API_URL}?url=${encodeURIComponent(linkData.url)}&date=${dateParam}&title=${encodeURIComponent(linkData.title || '')}`;
     
-    // 3. เปิดหน้าต่างใหม่เพื่อดาวน์โหลด PDF
+    // 3. เปิดหน้าต่างใหม่
     window.open(fullApiUrl, '_blank');
 };
 
