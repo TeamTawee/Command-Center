@@ -19,29 +19,35 @@ import { TagManagerModal, SearchModal, FormModal, ProfileModal } from './Modals.
 import { formatDate, getWeekNumber, getDomain, formatForInput, fetchLinkMetadata } from './utils.js';
 import { PRESET_TAGS, ASSET_TYPES, TASK_STATUSES, DEFAULT_SOP, SOP_GUIDE, COLUMN_LABELS, COL_DESCRIPTIONS } from './constants.js';
 
-// ตั้งค่า URL ของ API Web Reader ของคุณ
-const API_URL = "https://web-reader-service-952362075670.asia-southeast1.run.app/api/scrape"; 
+// ✅ UPDATE 1: เปลี่ยน URL เป็นตัวใหม่ที่คุณเพิ่ง Deploy เสร็จ
+const API_URL = "https://wweb-reader-pdf-api-952362075670.asia-southeast1.run.app/api/scrape"; 
 
-// ฟังก์ชันใหม่: ส่งข้อมูล Date และ Title จาก Database เราเอง ไปให้ระบบสร้าง PDF (V13 Logic)
+// ✅ UPDATE 2: อัปเกรดฟังก์ชันส่งข้อมูล ให้รองรับ Image Cover และชื่อไฟล์แบบละเอียด
 const openPDFService = (linkData) => {
     if (!linkData.url) return alert("ไม่พบ URL ของข่าวนี้");
 
-    // 1. ส่วนเตรียมวันที่ (Date)
-    // ตรงนี้ระบบพยายามดึง createdAt จาก Database มาแปลงเป็นปี-เดือน-วัน (YYYY-MM-DD)
-    let dateParam = "";
+    // 1. เตรียมวันที่ (Date) ให้เป็น Format ISO (เพื่อเอาไปตั้งชื่อไฟล์ละเอียดๆ: 2025-12-16_14-20)
+    let dateParam = new Date().toISOString(); 
     if (linkData.createdAt) {
         const dateObj = linkData.createdAt.toDate ? linkData.createdAt.toDate() : new Date(linkData.createdAt);
         if (!isNaN(dateObj)) {
-            dateParam = dateObj.toISOString().split('T')[0]; // ได้ค่า '2025-12-15'
+            dateParam = dateObj.toISOString(); 
         }
     }
 
-    // 🚨 2. จุดสำคัญ: ตรงนี้คือการส่งค่าออกไป (บรรทัดที่ 48)
-    // รูปแบบคือ: API_URL + ?url=... &date=... &title=...
-    const fullApiUrl = `${API_URL}?url=${encodeURIComponent(linkData.url)}&date=${dateParam}&title=${encodeURIComponent(linkData.title || '')}`;
-    
-    // 3. เปิดหน้าต่างใหม่
-    window.open(fullApiUrl, '_blank');
+    // 2. เตรียมลิงก์รูปภาพ (ส่งไปให้ Backend ฝังลง PDF)
+    const imageParam = linkData.imageUrl || "";
+
+    // 3. สร้าง Query String
+    const params = new URLSearchParams({
+        url: linkData.url,
+        title: linkData.title || '',
+        date_text: dateParam, // ส่งไปเป็น ISO String
+        image_url: imageParam // ✅ ส่งลิงก์รูปไปด้วย
+    });
+
+    // 4. เปิดหน้าต่างใหม่
+    window.open(`${API_URL}?${params.toString()}`, '_blank');
 };
 
 // --- Multi-select Tag Component ---
