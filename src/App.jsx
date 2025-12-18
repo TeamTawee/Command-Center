@@ -19,37 +19,6 @@ import { TagManagerModal, SearchModal, FormModal, ProfileModal } from './Modals.
 import { formatDate, getWeekNumber, getDomain, formatForInput, fetchLinkMetadata } from './utils.js';
 import { PRESET_TAGS, ASSET_TYPES, TASK_STATUSES, DEFAULT_SOP, SOP_GUIDE, COLUMN_LABELS, COL_DESCRIPTIONS } from './constants.js';
 
-// ✅ UPDATE 1: เปลี่ยน URL เป็นตัวใหม่ที่คุณเพิ่ง Deploy เสร็จ
-const API_URL = "https://wweb-reader-pdf-api-952362075670.asia-southeast1.run.app/api/scrape"; 
-
-// ✅ UPDATE 2: อัปเกรดฟังก์ชันส่งข้อมูล ให้รองรับ Image Cover และชื่อไฟล์แบบละเอียด
-const openPDFService = (linkData) => {
-    if (!linkData.url) return alert("ไม่พบ URL ของข่าวนี้");
-
-    // 1. เตรียมวันที่ (Date) ให้เป็น Format ISO (เพื่อเอาไปตั้งชื่อไฟล์ละเอียดๆ: 2025-12-16_14-20)
-    let dateParam = new Date().toISOString(); 
-    if (linkData.createdAt) {
-        const dateObj = linkData.createdAt.toDate ? linkData.createdAt.toDate() : new Date(linkData.createdAt);
-        if (!isNaN(dateObj)) {
-            dateParam = dateObj.toISOString(); 
-        }
-    }
-
-    // 2. เตรียมลิงก์รูปภาพ (ส่งไปให้ Backend ฝังลง PDF)
-    const imageParam = linkData.imageUrl || "";
-
-    // 3. สร้าง Query String
-    const params = new URLSearchParams({
-        url: linkData.url,
-        title: linkData.title || '',
-        date_text: dateParam, // ส่งไปเป็น ISO String
-        image_url: imageParam // ✅ ส่งลิงก์รูปไปด้วย
-    });
-
-    // 4. เปิดหน้าต่างใหม่
-    window.open(`${API_URL}?${params.toString()}`, '_blank');
-};
-
 // --- Multi-select Tag Component ---
 const MultiTagSelector = ({ availableTags, selectedTags, onTagsChange }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -356,34 +325,6 @@ export default function TeamTaweeApp() {
       setIsGlobalLoading(false);
   };
 
-  // --- ACTIONS: DOWNLOAD PDF ---
-  const handleDownloadPDF = async (link) => {
-    if (!currentUser) return;
-
-    const alreadyDownloaded = link.downloadedBy && link.downloadedBy.includes(currentUser.uid);
-
-    if (alreadyDownloaded) {
-        const confirmDownload = confirm("คุณเคยดาวน์โหลดไฟล์นี้ไปแล้ว ต้องการสร้าง PDF ใหม่อีกครั้งหรือไม่?");
-        if (!confirmDownload) return;
-    }
-
-    try {
-        openPDFService(link); // <--- เปลี่ยนมาเรียกตัวนี้แทน
-
-        // 3. บันทึกสถานะ (Logic เดิม ไม่ต้องแก้)
-        if (!alreadyDownloaded) {
-            const linkRef = doc(db, "published_links", link.id);
-            await updateDoc(linkRef, { downloadedBy: arrayUnion(currentUser.uid) });
-            
-            // อัปเดตสีปุ่มทันที
-            setPublishedLinks(prev => prev.map(l => l.id === link.id ? { ...l, downloadedBy: [...(l.downloadedBy||[]), currentUser.uid] } : l));
-            logActivity("Open PDF Service", link.title);
-        }
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-  };
-
   // --- ACTIONS: Plans & Others ---
   const togglePlanItem = async (pid, idx, items) => { const newItems = [...items]; newItems[idx].completed = !newItems[idx].completed; await updateDoc(doc(db,"plans",pid), {items:newItems, progress: Math.round((newItems.filter(i=>i.completed).length/newItems.length)*100)}); refreshData(); };
   const removePlanItem = async (pid, idx, items) => { if(confirm("ลบ?")) { const newItems = items.filter((_,i)=>i!==idx); await updateDoc(doc(db,"plans",pid), {items:newItems, progress: Math.round((newItems.filter(i=>i.completed).length/newItems.length)*100)||0}); refreshData(); }};
@@ -546,13 +487,6 @@ export default function TeamTaweeApp() {
                             <div className="flex justify-between items-start mb-2">
                                 <span className="bg-blue-50 text-blue-600 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">{link.platform || 'News'}</span>
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                                    <button 
-                                        onClick={() => handleDownloadPDF(link)} 
-                                        className={`w-6 h-6 flex items-center justify-center rounded-full transition-all ${(link.downloadedBy || []).includes(currentUser?.uid) ? 'bg-green-100 text-green-600 hover:bg-green-200' : 'bg-slate-100 text-slate-400 hover:bg-blue-100 hover:text-blue-600'}`}
-                                        title={ (link.downloadedBy || []).includes(currentUser?.uid) ? "โหลดอีกครั้ง (เคยโหลดแล้ว)" : "ดาวน์โหลด PDF" }
-                                    >
-                                        {(link.downloadedBy || []).includes(currentUser?.uid) ? <CheckCircle2 className="w-3.5 h-3.5"/> : <Download className="w-3.5 h-3.5" />}
-                                    </button>
                                     <button onClick={() => editPublishedLink(link)} className="text-slate-300 hover:text-blue-500"><Edit2 className="w-3.5 h-3.5" /></button>
                                     <button onClick={() => deleteLink(link.id)} className="text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
                                 </div>
