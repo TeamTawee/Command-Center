@@ -283,7 +283,22 @@ export default function TeamTaweeApp() {
   };
 
   const saveUrgentCase = async (task) => { if(!task.id)return; setIsGlobalLoading(true); try{ await updateDoc(doc(db,"tasks",task.id), {title:task.title||"", status:task.status||"To Do", link:task.link||"", sop:task.sop||[], updatedBy:currentUser.displayName, updatedAt:new Date().toISOString()}); logActivity("Update Urgent", task.title); setUrgentModal(null); refreshData(); }catch(e){alert(e.message);} setIsGlobalLoading(false); };
-  const addNewTask = (key) => openFormModal("เพิ่มงานใหม่", [{key:'title', label:'ชื่องาน'}, {key:'tags', label:'Tag', type:'multiselect-dropdown', options: strategyBoardAllTags.filter(t=>t!=='All'), defaultValue: []}, {key:'role', label:'ผู้รับผิดชอบ', defaultValue: currentUser.displayName}, {key:'status', label:'สถานะ', type:'select', options: TASK_STATUSES}, {key:'deadline', label:'กำหนดส่ง', type:'date'}, {key:'link', label:'Link ผลงาน'}], async(d)=>{ const tagsArray = d.tags || []; await addDoc(collection(db,"tasks"), { ...d, tags: tagsArray, tag: tagsArray.join(', '), role: d.role || currentUser.displayName, status:d.status||"To Do", link:d.link||"", columnKey:key, createdBy:currentUser.displayName, createdAt:new Date().toISOString() }); logActivity("Add Task", d.title); refreshData(); }, "สร้างงาน", { availableTags: strategyBoardAllTags.filter(t=>t!=='All') });
+  const addNewTask = (key, owner = 'tawee') => openFormModal("เพิ่มงานใหม่", [{key:'title', label:'ชื่องาน'}, {key:'tags', label:'Tag', type:'multiselect-dropdown', options: strategyBoardAllTags.filter(t=>t!=='All'), defaultValue: []}, {key:'role', label:'ผู้รับผิดชอบ', defaultValue: currentUser.displayName}, {key:'status', label:'สถานะ', type:'select', options: TASK_STATUSES}, {key:'deadline', label:'กำหนดส่ง', type:'date'}, {key:'link', label:'Link ผลงาน'}], async(d)=>{ 
+      const tagsArray = d.tags || []; 
+      await addDoc(collection(db,"tasks"), { 
+          ...d, 
+          tags: tagsArray, 
+          tag: tagsArray.join(', '), 
+          role: d.role || currentUser.displayName, 
+          status:d.status||"To Do", 
+          link:d.link||"", 
+          columnKey:key, 
+          owner: owner, // บันทึกว่างานนี้เป็นของใคร
+          createdBy:currentUser.displayName, 
+          createdAt:new Date().toISOString() 
+      }); 
+      logActivity("Add Task", d.title); refreshData(); 
+  }, "สร้างงาน", { availableTags: strategyBoardAllTags.filter(t=>t!=='All') });
 
   // --- ACTIONS: Assets & Links ---
   const addChannel = () => openFormModal("เพิ่มช่องทาง", [{key:'name', label:'ชื่อ'}, {key:'type', label:'ประเภท', type:'select', options: ASSET_TYPES, defaultValue:'Own media'}, {key:'url', label:'URL'}], async(d)=>{ await addDoc(collection(db,"channels"), {...d, count:0}); logActivity("Add Channel", d.name); refreshData(); });
@@ -293,14 +308,22 @@ export default function TeamTaweeApp() {
   const deleteLink = async (id) => { if(confirm("ลบ?")) { await deleteDoc(doc(db,"published_links",id)); logActivity("Delete Link", id); refreshData(); }};
   const deleteChannel = async (id) => { if(confirm("ลบ?")) { await deleteDoc(doc(db,"channels",id)); logActivity("Delete Channel", id); refreshData(); }};
   const deleteMedia = async (id) => { if(confirm("ลบ?")) { await deleteDoc(doc(db,"media",id)); logActivity("Delete Media", id); refreshData(); }};
+  const deleteTask = async (id) => { 
+    if(confirm("ต้องการลบงานนี้ใช่หรือไม่?")) { 
+      try {
+        await deleteDoc(doc(db, "tasks", id)); 
+        logActivity("Delete Task", id); 
+      } catch (e) { alert(e.message); }
+    }
+  };
 
-  const addPublishedLink = async () => {
+  const addPublishedLink = async (owner = 'tawee') => {
     const urlInput = prompt("กรุณาวาง Link ข่าวที่ต้องการเพิ่ม:"); if (!urlInput) return;
     setIsGlobalLoading(true);
     let meta = { title: "", image: "", date: "" };
     try { meta = await fetchLinkMetadata(urlInput) || meta; } catch (e) { alert("ดึงข้อมูลอัตโนมัติไม่สำเร็จ แต่คุณยังกรอกเองได้ครับ"); }
     setIsGlobalLoading(false);
-    setNewsModal({ isOpen: true, isEdit: false, data: { url: urlInput, title: meta.title||"", imageUrl: meta.image||"", platform: 'Website', customDate: formatForInput(meta.date || new Date()), tags: [] }});
+    setNewsModal({ isOpen: true, isEdit: false, owner: owner, data: { url: urlInput, title: meta.title||"", imageUrl: meta.image||"", platform: 'Website', customDate: formatForInput(meta.date || new Date()), tags: [] }});
   };
 
   const editPublishedLink = (link) => setNewsModal({ isOpen: true, isEdit: true, data: { ...link, customDate: formatForInput(link.createdAt), tags: link.tags || [] } });
@@ -311,7 +334,14 @@ export default function TeamTaweeApp() {
       try {
           const d = newsModal.data;
           const finalDate = d.customDate ? new Date(d.customDate) : new Date();
-          const baseData = { title: d.title||"No Title", url: d.url||"", imageUrl: d.imageUrl||"", platform: d.platform||"Website", tags: d.tags||[] };
+          const baseData = { 
+            title: d.title||"No Title", 
+            url: d.url||"", 
+            imageUrl: d.imageUrl||"", 
+            platform: d.platform||"Website", 
+            tags: d.tags||[],
+            owner: newsModal.owner || d.owner || 'tawee' // เพิ่มฟิลด์เจ้าของข่าว
+          };
           
           if (newsModal.isEdit) {
               await updateDoc(doc(db, "published_links", d.id), { ...baseData, createdAt: finalDate, updatedAt: serverTimestamp() });
@@ -349,10 +379,16 @@ export default function TeamTaweeApp() {
    
   const navItems = [
     { id: 'dashboard', title: 'ภาพรวม', subtitle: 'Dashboard', icon: LayoutDashboard },
-    { id: 'newsroom', title: 'ห้องข่าว & สื่อ', subtitle: 'Newsroom', icon: Globe, color: 'text-indigo-500' }, 
-    { id: 'strategy', title: 'กระดาน 4 แกน', subtitle: 'Strategy', icon: Megaphone },
+    { id: 'newsroom_tawee', title: 'ห้องข่าว ท่านทวี', subtitle: 'พ.ต.อ.ทวี สอดส่อง', icon: Globe, color: 'text-indigo-500' }, 
+    { id: 'newsroom_ravit', title: 'ห้องข่าว คุณรวิศ', subtitle: 'คุณรวิศ สอดส่อง', icon: Globe, color: 'text-blue-500' },
+    
+    // --- จุดที่แก้ไข: ลบอันเก่าทิ้ง แล้วใส่อันใหม่ 2 อันนี้แทน ---
+    { id: 'strategy_tawee', title: 'กระดาน 4 แกน (ท่านทวี)', subtitle: 'Strategy Tawee', icon: Megaphone, color: 'text-indigo-600' },
+    { id: 'strategy_ravit', title: 'กระดาน 4 แกน (คุณรวิศ)', subtitle: 'Strategy Ravit', icon: Megaphone, color: 'text-blue-500' },
+    // --------------------------------------------------------
+
     { id: 'masterplan', title: 'แผนงานหลัก', subtitle: 'Master Plan', icon: MapIcon }, 
-    { id: 'rapidresponse', title: 'ปฏิบัติการด่วน', subtitle: 'Rapid Response', icon: Zap, color: 'text-red-500' },
+    { id: 'rapidresponse', title: 'ปฏิบัติการด่วน', subtitle: 'Agile Response Unit', icon: Zap, color: 'text-red-500' },
     { id: 'assets', title: 'คลังข้อมูลสื่อ', subtitle: 'Media Assets', icon: Database },
   ];
   if(userProfile?.role === 'Admin') navItems.push({ id: 'admin', title: 'ผู้ดูแลระบบ', subtitle: 'Admin & Logs', icon: Shield });
@@ -363,59 +399,233 @@ export default function TeamTaweeApp() {
     return parts.length === 1 ? parts[0].substring(0, 2).toUpperCase() : (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   };
 
+  // แทนที่ฟังก์ชัน renderDashboard เดิมด้วยอันนี้
   const renderDashboard = () => {
-    const taskStats = { done: 0, doing: 0, waiting: 0, total: 0 };
-    tasks.forEach(t => { if (t.status !== 'Canceled') { taskStats.total++; if (t.status === 'Done') taskStats.done++; else if (t.status === 'In Progress' || t.status === 'In Review') taskStats.doing++; else taskStats.waiting++; } });
     return (
-      <div className="space-y-6 animate-fadeIn">
-        <PageHeader title="ภาพรวมสถานการณ์" subtitle="Overview & Statistics" action={<div className="flex gap-2"><button onClick={() => setIsSearchOpen(true)} className="p-2 bg-white border rounded-lg text-slate-500 hover:bg-slate-50"><Search className="w-5 h-5"/></button><button onClick={() => addNewTask('solver')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700 transition-colors"> + งานทั่วไป </button><button onClick={addPublishedLink} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors"> เพิ่มข่าว </button></div>} />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center justify-center relative overflow-hidden"><p className="text-slate-500 text-xs font-bold uppercase mb-6 w-full text-left">Task Status</p><StatusDonutChart stats={taskStats} /><div className="flex justify-center gap-4 mt-6 text-[10px] font-bold w-full flex-wrap"><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div>เสร็จ ({taskStats.done})</div><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-blue-500"></div>กำลังทำ ({taskStats.doing})</div><div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-slate-300"></div>รอ ({taskStats.waiting})</div></div></div>
-          <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Megaphone className="w-5 h-5 text-blue-500"/> พรีวิว 4 แกน</h3>
-              <button onClick={() => navigateTo('strategy')} className="text-sm text-blue-600 font-bold hover:underline">ไปที่กระดาน &rarr;</button>
+      <div className="space-y-8 animate-fadeIn">
+        <PageHeader 
+          title="ศูนย์รวมข่าวสาร (News Center)" 
+          subtitle="Real-time News Monitoring" 
+          action={
+            <div className="flex gap-2">
+              <button onClick={() => addPublishedLink('tawee')} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm flex items-center gap-2"> 
+                <Plus className="w-4 h-4" /> ข่าวท่านทวี 
+              </button>
+              <button onClick={() => addPublishedLink('ravit')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-2"> 
+                <Plus className="w-4 h-4" /> ข่าวคุณรวิศ 
+              </button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {['solver', 'principles', 'defender', 'expert'].map(key => (
-                <div key={key} className="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
-                  <h4 className="font-black text-slate-700 text-xs uppercase truncate mb-2">{COLUMN_LABELS[key]}</h4>
-                  <div className="space-y-2">
-                    {groupedTasks[key].slice(0, 3).map(task => (
-                      <div key={task.id} onClick={() => { const taskToEdit = {...task}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(t=>t.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }} className="bg-white p-2.5 rounded-md shadow-sm border border-slate-100 cursor-pointer hover:border-blue-400 transition-all group">
-                        <p className="text-xs font-bold text-slate-600 line-clamp-2 group-hover:text-blue-600">{task.title}</p>
-                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
-                          <StatusBadge status={task.status} /> <span className="text-[10px] text-slate-400 font-medium">{getInitials(task.role || task.createdBy)}</span>
-                        </div>
+          } 
+        />
+
+        {/* --- ส่วนที่ 1: ข่าวประชาสัมพันธ์ (ท่านทวี) --- */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-50">
+            <h3 className="font-black text-xl text-slate-800 flex items-center gap-3">
+              <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600">
+                <Globe className="w-6 h-6"/>
+              </div>
+              ข่าวประชาสัมพันธ์ (ท่านทวี)
+            </h3>
+            <button onClick={() => navigateTo('newsroom_tawee')} className="text-sm text-indigo-600 font-bold hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors">
+              ดูทั้งหมด &rarr;
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {publishedLinks
+              .filter(link => (link.owner || 'tawee') === 'tawee')
+              .sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+              .slice(0, 10) // เพิ่มจำนวนแสดงผลเป็น 10 ข่าว
+              .map(link => (
+                <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group bg-white rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-400 hover:shadow-xl transition-all duration-300 flex flex-col h-full">
+                  <div className="aspect-video bg-slate-100 relative overflow-hidden">
+                    {link.imageUrl ? (
+                      <img src={`https://wsrv.nl/?url=${encodeURIComponent(link.imageUrl)}&w=400&q=75`} alt={link.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/600x400?text=No+Image"; }} />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                        <FileText className="w-8 h-8 mb-1"/>
+                        <span className="text-[10px]">No Image</span>
                       </div>
-                    ))}
-                    {groupedTasks[key].length === 0 && <div className="text-center py-4 text-xs text-slate-400">ไม่มีงาน</div>}
+                    )}
                   </div>
-                </div>
+                  <div className="p-4 flex flex-col flex-1">
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase mb-2 tracking-wide">{link.platform || 'News'}</span>
+                    <h4 className="font-bold text-slate-800 text-sm leading-snug line-clamp-3 mb-3 group-hover:text-indigo-600 transition">{link.title}</h4>
+                    <div className="mt-auto pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] text-slate-400">
+                      <div className="flex items-center gap-1"><LinkIcon className="w-3 h-3" /> {getDomain(link.url)}</div>
+                      <div className="flex items-center gap-1"><Clock className="w-3 h-3"/> {link.createdAt ? formatDate(link.createdAt).split(' ')[0] : '-'}</div>
+                    </div>
+                  </div>
+                </a>
               ))}
-            </div>
+              {publishedLinks.filter(link => (link.owner || 'tawee') === 'tawee').length === 0 && (
+                <div className="col-span-full py-10 text-center text-slate-400 bg-slate-50 rounded-xl border-dashed border-2 border-slate-200">
+                  ไม่พบข้อมูลข่าว
+                </div>
+              )}
           </div>
         </div>
-        <div className="pt-6 border-t border-slate-200"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Globe className="w-5 h-5 text-indigo-500"/> ข่าวประชาสัมพันธ์ล่าสุด</h3><button onClick={() => navigateTo('newsroom')} className="text-sm text-indigo-600 font-bold hover:underline"> ดูทั้งหมด &rarr;</button></div><div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">{publishedLinks.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 6).map(link => (<a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group bg-white rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-400 hover:shadow-lg transition-all flex flex-col"><div className="aspect-video bg-slate-100 relative overflow-hidden">{link.imageUrl ? <img src={link.imageUrl} alt={link.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" /> : <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><FileText className="w-8 h-8 mb-1"/><span className="text-[10px]">No Image</span></div>}</div><div className="p-3 flex flex-col flex-1"><span className="text-[9px] font-bold text-indigo-500 uppercase mb-1">{link.platform || 'News'}</span><h4 className="font-bold text-slate-800 text-xs line-clamp-2 mb-2 group-hover:text-indigo-600 transition">{link.title}</h4><div className="text-[9px] text-slate-400 font-medium mb-2 flex items-center gap-1"><LinkIcon className="w-2.5 h-2.5" />{getDomain(link.url)}</div><div className="mt-auto flex items-center gap-1 text-[9px] text-slate-400"><Clock className="w-3 h-3"/> {link.createdAt ? formatDate(link.createdAt).split(' ')[0] : '-'}</div></div></a>))}</div></div>
-        
-        {urgentModal && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200] p-4 animate-fadeIn"><div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative"><button onClick={() => setUrgentModal(null)} className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded-full"><X className="w-5 h-5 text-slate-400" /></button><h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><AlertTriangle className="text-red-500"/> แก้ไขเคสด่วน</h3><div className="space-y-4"><input type="text" value={urgentModal.title} onChange={e=>setUrgentModal({...urgentModal, title:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" /><div className="flex gap-4"><select value={urgentModal.status} onChange={e=>setUrgentModal({...urgentModal, status:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm"><option>To Do</option><option>In Progress</option><option>In Review</option><option>Done</option><option>Canceled</option></select></div><div><p className="text-sm font-bold text-slate-600 mb-2">Checklist ความคืบหน้า</p><div className="space-y-2">{urgentModal.sop?.map((item, idx) => (<div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg"><label htmlFor={`sop-${idx}`} className="flex items-center gap-2 cursor-pointer"><input type="checkbox" id={`sop-${idx}`} checked={item.done} onChange={()=>{ const newSop = [...urgentModal.sop]; newSop[idx].done = !newSop[idx].done; setUrgentModal({...urgentModal, sop: newSop}); }} />{item.text}</label></div>))}</div></div><input type="text" value={urgentModal.link} onChange={e=>setUrgentModal({...urgentModal, link:e.target.value})} className="w-full border-2 border-slate-200 rounded-lg p-2.5 text-sm" placeholder="Link ผลงาน" /></div><div className="mt-6 flex justify-end gap-3"><button onClick={() => setUrgentModal(null)} className="px-4 py-2 rounded-lg text-slate-600 border border-slate-300 hover:bg-slate-100">ยกเลิก</button><button onClick={() => saveUrgentCase(urgentModal)} className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700">บันทึก</button></div></div></div>}
+
+        {/* --- ส่วนที่ 2: ข่าวประชาสัมพันธ์ (คุณรวิศ) --- */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-50">
+            <h3 className="font-black text-xl text-slate-800 flex items-center gap-3">
+              <div className="bg-blue-100 p-2 rounded-xl text-blue-600">
+                <Globe className="w-6 h-6"/>
+              </div>
+              ข่าวประชาสัมพันธ์ (คุณรวิศ)
+            </h3>
+            <button onClick={() => navigateTo('newsroom_ravit')} className="text-sm text-blue-600 font-bold hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">
+              ดูทั้งหมด &rarr;
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {publishedLinks
+              .filter(link => link.owner === 'ravit')
+              .sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+              .slice(0, 10) // เพิ่มจำนวนแสดงผลเป็น 10 ข่าว
+              .map(link => (
+                <a key={link.id} href={link.url} target="_blank" rel="noreferrer" className="group bg-white rounded-xl overflow-hidden border border-slate-200 hover:border-blue-400 hover:shadow-xl transition-all duration-300 flex flex-col h-full">
+                  <div className="aspect-video bg-slate-100 relative overflow-hidden">
+                    {link.imageUrl ? (
+                      <img src={`https://wsrv.nl/?url=${encodeURIComponent(link.imageUrl)}&w=400&q=75`} alt={link.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/600x400?text=No+Image"; }} />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                        <FileText className="w-8 h-8 mb-1"/>
+                        <span className="text-[10px]">No Image</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 flex flex-col flex-1">
+                    <span className="text-[10px] font-bold text-blue-500 uppercase mb-2 tracking-wide">{link.platform || 'News'}</span>
+                    <h4 className="font-bold text-slate-800 text-sm leading-snug line-clamp-3 mb-3 group-hover:text-blue-600 transition">{link.title}</h4>
+                    <div className="mt-auto pt-3 border-t border-slate-50 flex items-center justify-between text-[10px] text-slate-400">
+                      <div className="flex items-center gap-1"><LinkIcon className="w-3 h-3" /> {getDomain(link.url)}</div>
+                      <div className="flex items-center gap-1"><Clock className="w-3 h-3"/> {link.createdAt ? formatDate(link.createdAt).split(' ')[0] : '-'}</div>
+                    </div>
+                  </div>
+                </a>
+              ))}
+              {publishedLinks.filter(link => link.owner === 'ravit').length === 0 && (
+                <div className="col-span-full py-10 text-center text-slate-400 bg-slate-50 rounded-xl border-dashed border-2 border-slate-200">
+                  ไม่พบข้อมูลข่าว
+                </div>
+              )}
+          </div>
+        </div>
+
       </div>
     );
   };
 
-  const renderStrategy = () => { return <div className="h-full flex flex-col"><PageHeader title="กระดานยุทธศาสตร์ 4 แกน" subtitle="Strategy Board & Tasks" action={<div className="flex flex-wrap gap-3"><div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200"><ArrowDownWideNarrow className="w-4 h-4 text-slate-500" /><select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="newest">ล่าสุด (Newest)</option><option value="oldest">เก่าสุด (Oldest)</option></select></div><div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200"><Filter className="w-4 h-4 text-slate-500" /><select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="All">All Tags</option>{strategyBoardAllTags.filter(t=>t!=='All').map(tag => <option key={tag} value={tag}>{tag}</option>)}</select></div><button onClick={() => setHideDone(!hideDone)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition ${hideDone ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-300'}`}>{hideDone ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />} {hideDone ? "Show Done" : "Hide Done"}</button><button onClick={() => setIsStrategyTagManagerOpen(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition bg-slate-800 text-white hover:bg-black border-slate-600"><Tag className="w-4 h-4" /> จัดการ Tag</button></div>} /><div className="overflow-x-auto pb-4 flex-1 custom-scrollbar"><div className="flex flex-col md:flex-row gap-4 min-w-full md:min-w-[1200px] h-full">{['solver', 'principles', 'defender', 'expert', 'backoffice'].map((key) => { const filteredAndSorted = groupedTasks[key].filter(t => { const taskTags = Array.isArray(t.tags) && t.tags.length > 0 ? t.tags : (t.tag ? t.tag.split(',').map(s=>s.trim()).filter(Boolean) : []); const matchesTag = filterTag === 'All' || taskTags.includes(filterTag); const isDone = t.status === 'Done'; return matchesTag && (!hideDone || !isDone); }); return (<div key={key} className={`w-full md:w-1/5 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col h-full`}><div className="flex justify-between items-center mb-4"><div className="w-full"><h3 className="font-black text-slate-800 text-sm uppercase flex items-center">{COLUMN_LABELS[key]}<span className="ml-2 text-xs bg-slate-200 text-slate-600 font-bold w-6 h-6 flex items-center justify-center rounded-full">{filteredAndSorted.length}</span></h3><p className="text-[11px] text-slate-400 mt-1">{COL_DESCRIPTIONS[key]}</p></div><button onClick={() => addNewTask(key)} className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-600 hover:text-white transition"><Plus className="w-5 h-5"/></button></div><div className="space-y-3 overflow-y-auto flex-1 -mr-2 pr-2 custom-scrollbar">{filteredAndSorted.map(task => { const taskTags = Array.isArray(task.tags) ? task.tags : (task.tag ? task.tag.split(',').map(s=>s.trim()).filter(Boolean) : []); return (<div key={task.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-500 hover:shadow-md transition-all group relative"><div className="flex justify-between items-start" onClick={() => { const taskToEdit = {...task}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(t=>t.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }}><p className="text-sm font-bold text-slate-800 line-clamp-3 pr-4 group-hover:text-blue-700">{task.title}</p><StatusBadge status={task.status} /></div>{taskTags.length > 0 && (<div className="flex flex-wrap gap-1 mt-2">{taskTags.map(t => (<span key={t} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-medium">{t}</span>))}</div>)}<div className="flex items-end justify-between mt-3 pt-3 border-t border-slate-100"><div className="flex items-center gap-2 text-xs text-slate-500">{task.deadline && (<div className="flex items-center gap-1"><Clock className="w-3.5 h-3.5"/><span>{new Date(task.deadline).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span></div>)}</div><div className="flex items-center gap-1"><div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs border-2 border-white shadow-sm font-bold">{getInitials(task.role || task.createdBy)}</div></div></div>{task.link && <a href={task.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="absolute top-2 right-2 p-1 rounded-full bg-slate-100 text-slate-500 opacity-0 group-hover:opacity-100 transition hover:bg-blue-100"><LinkIcon className="w-3.5 h-3.5"/></a>}</div>);})}</div></div>);})}</div></div></div>; };
+  // แทนที่ renderStrategy ตัวเดิมด้วยอันนี้
+  const renderStrategy = (ownerType = 'tawee') => { 
+      const ownerTasks = tasks.filter(t => {
+    const owner = t.owner || 'tawee';
+    // ถ้าดูห้อง ravit ให้เอาทั้ง 'ravit' และคำผิด 'rawit' มาแสดง
+    if (ownerType === 'ravit') return owner === 'ravit' || owner === 'rawit';
+    return owner === ownerType;
+});
+
+      const localGroupedTasks = { 
+          solver: sortTasks(ownerTasks.filter(t => t.columnKey === 'solver')), 
+          principles: sortTasks(ownerTasks.filter(t => t.columnKey === 'principles')), 
+          defender: sortTasks(ownerTasks.filter(t => t.columnKey === 'defender')), 
+          expert: sortTasks(ownerTasks.filter(t => t.columnKey === 'expert')), 
+          backoffice: sortTasks(ownerTasks.filter(t => t.columnKey === 'backoffice')) 
+      };
+
+      return (
+          <div className="h-full flex flex-col">
+              <PageHeader 
+                  title={ownerType === 'tawee' ? "ท่านทวี" : "คุณรวิศ"} 
+                  subtitle="Strategy Board & Tasks" 
+                  action={
+                      <div className="flex flex-wrap gap-3">
+                          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                              <ArrowDownWideNarrow className="w-4 h-4 text-slate-500" />
+                              <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="newest">ล่าสุด (Newest)</option><option value="oldest">เก่าสุด (Oldest)</option></select>
+                          </div>
+                          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200">
+                              <Filter className="w-4 h-4 text-slate-500" />
+                              <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="bg-transparent text-sm border-none focus:ring-0 cursor-pointer outline-none"><option value="All">All Tags</option>{strategyBoardAllTags.filter(t=>t!=='All').map(tag => <option key={tag} value={tag}>{tag}</option>)}</select>
+                          </div>
+                          <button onClick={() => setHideDone(!hideDone)} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition ${hideDone ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-300'}`}>{hideDone ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />} {hideDone ? "Show Done" : "Hide Done"}</button>
+                          <button onClick={() => setIsStrategyTagManagerOpen(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold border transition bg-slate-800 text-white hover:bg-black border-slate-600"><Tag className="w-4 h-4" /> จัดการ Tag</button>
+                      </div>
+                  } 
+              />
+              <div className="overflow-x-auto pb-4 flex-1 custom-scrollbar">
+                  <div className="flex flex-col md:flex-row gap-4 min-w-full md:min-w-[1200px] h-full">
+                      {['solver', 'principles', 'defender', 'expert', 'backoffice'].map((key) => { 
+                          const filteredAndSorted = localGroupedTasks[key].filter(t => { 
+                              const taskTags = Array.isArray(t.tags) && t.tags.length > 0 ? t.tags : (t.tag ? t.tag.split(',').map(s=>s.trim()).filter(Boolean) : []); 
+                              const matchesTag = filterTag === 'All' || taskTags.includes(filterTag); 
+                              const isDone = t.status === 'Done'; 
+                              return matchesTag && (!hideDone || !isDone); 
+                          }); 
+                          return (
+                              <div key={key} className={`w-full md:w-1/5 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col h-full`}>
+                                  <div className="flex justify-between items-center mb-4">
+                                      <div className="w-full">
+                                          <h3 className="font-black text-slate-800 text-sm uppercase flex items-center">{COLUMN_LABELS[key]}<span className="ml-2 text-xs bg-slate-200 text-slate-600 font-bold w-6 h-6 flex items-center justify-center rounded-full">{filteredAndSorted.length}</span></h3>
+                                          <p className="text-[11px] text-slate-400 mt-1">{COL_DESCRIPTIONS[key]}</p>
+                                      </div>
+                                      <button onClick={() => addNewTask(key, ownerType)} className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-600 hover:text-white transition"><Plus className="w-5 h-5"/></button>
+                                  </div>
+                                  <div className="space-y-3 overflow-y-auto flex-1 -mr-2 pr-2 custom-scrollbar">
+                                      {filteredAndSorted.map(task => { 
+                                          const taskTags = Array.isArray(task.tags) ? task.tags : (task.tag ? task.tag.split(',').map(s=>s.trim()).filter(Boolean) : []); 
+                                          return (
+                                              <div key={task.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-blue-500 hover:shadow-md transition-all group relative">
+                                                  <div className="flex justify-between items-start" onClick={() => { const taskToEdit = {...task}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(t=>t.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }}>
+                                                      <p className="text-sm font-bold text-slate-800 line-clamp-3 pr-4 group-hover:text-blue-700 flex-1">{task.title}</p>
+                                                      <div className="flex flex-col items-end gap-1 ml-2">
+                                                        <StatusBadge status={task.status} />
+                                                        {/* ปุ่มลบงาน */}
+                                                        <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} className="text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity" title="ลบงาน">
+                                                          <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                      </div>
+                                                  </div>
+                                                  {taskTags.length > 0 && (<div className="flex flex-wrap gap-1 mt-2">{taskTags.map(t => (<span key={t} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-medium">{t}</span>))}</div>)}
+                                                  <div className="flex items-end justify-between mt-3 pt-3 border-t border-slate-100">
+                                                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                          {task.deadline && (<div className="flex items-center gap-1"><Clock className="w-3.5 h-3.5"/><span>{new Date(task.deadline).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span></div>)}
+                                                      </div>
+                                                      <div className="flex items-center gap-1"><div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs border-2 border-white shadow-sm font-bold">{getInitials(task.role || task.createdBy)}</div></div>
+                                                  </div>
+                                                  {task.link && <a href={task.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="absolute top-2 right-2 p-1 rounded-full bg-slate-100 text-slate-500 opacity-0 group-hover:opacity-100 transition hover:bg-blue-100"><LinkIcon className="w-3.5 h-3.5"/></a>}
+                                              </div>
+                                          );
+                                      })}
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+              </div>
+          </div>
+      ); 
+  };
   const renderMasterPlan = () => (<div className="space-y-6"><PageHeader title="แผนงานหลัก (Master Plan)" subtitle="Long-term Roadmap" action={<button onClick={addPlan} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition flex items-center gap-2"><Plus className="w-4 h-4" /> สร้างแผนใหม่</button>} /><div className="grid grid-cols-1 lg:grid-cols-2 gap-6">{plans.map((plan) => { const sortedItems = [...(plan.items || [])].map((item, idx) => ({ ...item, originalIndex: idx })).sort((a, b) => Number(a.completed) - Number(b.completed)); return (<div key={plan.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition"><div className="flex justify-between items-start mb-6"><div className="flex items-center gap-2 cursor-pointer" onClick={() => editPlanTitle(plan)}><h3 className="font-bold text-lg text-slate-800">{plan.title}</h3><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600" /></div><button onClick={async () => { if(confirm("ลบแผนนี้?")) { await deleteDoc(doc(db, "plans", plan.id)); logActivity("Delete Plan", plan.title); refreshData(); }}} className="text-slate-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></div><div className="mb-6"><div className="w-full bg-slate-100 rounded-full h-2.5"><div className="bg-blue-600 h-2.5 rounded-full transition-all duration-1000" style={{ width: `${plan.progress || 0}%` }}></div></div></div><ul className="space-y-1">{sortedItems.map((item) => (<li key={item.originalIndex} className={`flex items-center justify-between gap-3 text-sm p-2 rounded-lg hover:bg-slate-50 transition ${item.completed ? 'opacity-50' : ''}`}><div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => togglePlanItem(plan.id, item.originalIndex, plan.items)}>{item.completed ? <CheckCircle2 className="w-5 h-5 text-green-500" /> : <Circle className="w-5 h-5 text-slate-300" />}<span className={item.completed ? "line-through" : ""}>{item.text}</span></div><div className="flex items-center gap-2"><button onClick={() => editPlanItem(plan.id, item.originalIndex, plan.items)}><Edit2 className="w-4 h-4 text-slate-300 hover:text-blue-600"/></button><button onClick={() => removePlanItem(plan.id, item.originalIndex, plan.items)}><Trash2 className="w-4 h-4 text-slate-300 hover:text-red-600"/></button></div></li>))}</ul><div className="mt-4"><button onClick={() => openFormModal("เพิ่มรายการ", [{key:'text', label:'ข้อความ'}], async(d) => { const newItems = [...(plan.items || []), {text: d.text, completed: false}]; const p = Math.round((newItems.filter(i=>i.completed).length/newItems.length)*100); await updateDoc(doc(db, "plans", plan.id), {items: newItems, progress: p}); refreshData(); })} className="w-full text-center py-2 bg-slate-50 rounded-lg text-slate-600 hover:bg-slate-100 transition text-sm">+ เพิ่มรายการ</button></div></div>); })}</div></div>);
   const renderRapidResponse = () => (<div className="space-y-6"><PageHeader title="ปฏิบัติการด่วน" subtitle="Agile Response Unit" action={<button onClick={createUrgentCase} className="bg-red-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-red-700 shadow-lg flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> เปิดเคสด่วน</button>} /><div className="flex flex-col lg:flex-row gap-6"><div className={`lg:w-1/3 bg-white rounded-2xl border border-slate-200 shadow-sm h-fit overflow-hidden`}><div className="p-4 bg-slate-50 font-bold text-slate-800 flex items-center gap-2 cursor-pointer" onClick={()=>setIsSopOpen(!isSopOpen)}><FileText className="w-5 h-5"/> SOP Guide (คู่มือ) <ChevronDown className={`ml-auto transform ${isSopOpen?'rotate-180':''}`}/></div>{isSopOpen && <div className="p-6 space-y-3 text-sm text-slate-600">{SOP_GUIDE.map((s,i)=><p key={i}>{s}</p>)}</div>}</div><div className="lg:w-2/3 space-y-6"><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{urgentTasks.map(task => (<div key={task.id} className="bg-white p-5 rounded-2xl border-l-[6px] border-red-500 shadow-sm hover:shadow-md cursor-pointer" onClick={() => setUrgentModal(task)}><div className="flex justify-between mb-3"><span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded animate-pulse">URGENT</span><StatusBadge status={task.status} /></div><h3 className="font-bold text-slate-800 mb-3 text-lg">{task.title}</h3>{task.deadline && <p className="text-xs text-slate-500 mb-4 flex gap-1"><Clock className="w-3.5 h-3.5"/> {task.deadline}</p>}<div className="pt-3 border-t border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Progress Checklist</p><div className="flex gap-1.5 h-2">{(task.sop && task.sop.length > 0 ? task.sop : Array(5).fill({done:false})).map((s, i) => (<div key={i} className={`flex-1 rounded-full transition-all ${s.done ? 'bg-green-500 shadow-sm' : 'bg-slate-200'}`}></div>))}</div></div></div>))}</div><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><h3 className="font-bold mb-4">Backoffice (งานสนับสนุน)</h3><div className="space-y-2">{groupedTasks.backoffice.map(t=>(<div key={t.id} onClick={() => { const taskToEdit = {...t}; if (!Array.isArray(taskToEdit.tags)) { taskToEdit.tags = taskToEdit.tag && typeof taskToEdit.tag === 'string' ? taskToEdit.tag.split(',').map(tag=>tag.trim()).filter(Boolean) : []}; setEditingTask(taskToEdit); }} className="flex justify-between items-center p-3 border rounded-lg hover:bg-slate-50 cursor-pointer"><div><p className="font-bold">{t.title}</p><p className="text-xs text-slate-500">{t.role}</p></div><StatusBadge status={t.status}/></div>))}</div></div></div></div></div>);
   const renderAssets = () => (<div className="space-y-6"><PageHeader title="คลังข้อมูลสื่อ" subtitle="Media Assets" /><div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 rounded-2xl shadow-lg text-white flex justify-between items-center"><div><h3 className="text-2xl font-black mb-2">Google Drive</h3><p className="text-blue-100">พื้นที่เก็บไฟล์ต้นฉบับ</p></div><a href="https://drive.google.com/drive/folders/0AHTNNQ96Wgq-Uk9PVA" target="_blank" rel="noreferrer" className="bg-white text-blue-700 px-6 py-3 rounded-xl font-bold shadow-xl flex items-center gap-2"><ExternalLink className="w-5 h-5"/> เปิด Drive</a></div><div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><div className="flex justify-between mb-6"><h3 className="font-bold text-lg">Channels</h3><button onClick={addChannel} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button></div><div className="space-y-3">{channels.map(c => (<div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md cursor-pointer" onClick={() => updateChannel(c)}><div><p className="font-bold text-slate-700">{c.name}</p><span className="text-xs bg-slate-100 px-2 py-0.5 rounded">{c.type}</span></div><button onClick={(e) => {e.stopPropagation(); deleteChannel(c.id)}}><Trash2 className="w-5 h-5 text-slate-300 hover:text-red-500"/></button></div>))}</div></div><div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm"><div className="flex justify-between mb-6"><h3 className="font-bold text-lg">Media List</h3><button onClick={addMedia} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">+ เพิ่ม</button></div><div className="space-y-3 overflow-y-auto max-h-[500px]">{media.map(c => (<div key={c.id} className="flex justify-between p-4 border rounded-xl hover:shadow-md"><div onClick={() => editMedia(c)} className="flex-1 cursor-pointer"><p className="font-bold text-slate-700">{c.name}</p><div className="text-xs text-slate-500 mt-1 flex gap-4"><span>{c.type}</span><span>{c.phone}</span><span>{c.line}</span></div></div><div className="flex items-center gap-2"><button onClick={(e) => {e.stopPropagation(); deleteMedia(c.id)}}><Trash2 className="w-5 h-5 text-slate-300 hover:text-red-500"/></button></div></div>))}</div></div></div></div>);
 
-  const renderNewsroom = () => {
+  const renderNewsroom = (ownerType = 'tawee') => {
     const usedTags = new Set(publishedLinks.flatMap(link => link.tags || []));
     systemTags.forEach(t => usedTags.add(t.name));
     const allNewsTags = ['All', ...Array.from(usedTags)].filter(Boolean);
     const tagColorMap = systemTags.reduce((acc, t) => ({ ...acc, [t.name]: t.color }), {});
     const getTagColor = (tagName) => tagColorMap[tagName] || '#64748b';
 
-    let filteredLinks = publishedLinks;
+    let filteredLinks = publishedLinks.filter(link => {
+    const owner = link.owner || 'tawee';
+    // ถ้าดูห้อง ravit ให้เอาทั้ง 'ravit' และคำผิด 'rawit' มาแสดง
+    if (ownerType === 'ravit') return owner === 'ravit' || owner === 'rawit';
+    return owner === ownerType;
+});
+    
     if (newsStartDate && newsEndDate) {
       const start = new Date(newsStartDate).setHours(0, 0, 0, 0);
       const end = new Date(newsEndDate).setHours(23, 59, 59, 999);
@@ -441,19 +651,27 @@ export default function TeamTaweeApp() {
 
     return (
       <div className="space-y-6 animate-fadeIn pb-20 relative">
-        <PageHeader title="ห้องข่าว & สื่อประชาสัมพันธ์" subtitle="Newsroom & Public Relations" action={
-          <div className="flex flex-wrap items-end gap-3 bg-white p-2 rounded-xl border shadow-sm">
-            <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold ml-1">ตั้งแต่วันที่</span><input type="date" value={newsStartDate} onChange={e => setNewsStartDate(e.target.value)} className="text-xs border rounded-lg p-1.5 outline-none focus:border-blue-500 text-slate-600" /></div>
-            <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold ml-1">ถึงวันที่</span><input type="date" value={newsEndDate} onChange={e => setNewsEndDate(e.target.value)} className="text-xs border rounded-lg p-1.5 outline-none focus:border-blue-500 text-slate-600" /></div>
-            <button onClick={() => { setNewsStartDate(''); setNewsEndDate(''); setNewsFilterTag('All'); }} className="p-2 rounded-full text-slate-400 transition-all duration-300 group relative hover:text-white hover:bg-red-500 hover:shadow-[0_0_15px_rgba(239,68,68,0.5)] hover:scale-110 hover:-rotate-12 active:scale-90 active:rotate-12" title="ล้างค่า">
-                <RefreshCw className="w-4 h-4 transition-transform duration-500 ease-in-out group-hover:rotate-[360deg]" />
-                <span className="absolute inset-0 rounded-full bg-red-400 opacity-0 group-hover:animate-ping pointer-events-none"></span>
-            </button>
-            <div className="w-px h-8 bg-slate-200 mx-1"></div>
-            <button onClick={() => setIsTagManagerOpen(true)} className="bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-black shadow-md flex items-center gap-2 h-fit mb-0.5"><Tag className="w-3.5 h-3.5" /> จัดการ Tag</button>
-            <button onClick={() => addPublishedLink()} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 shadow-md flex items-center gap-2 h-fit mb-0.5"><Plus className="w-4 h-4" /> เพิ่มข่าว</button>
-          </div>
-        } />
+        <PageHeader 
+          title={ownerType === 'tawee' ? "ห้องข่าว ท่านทวี สอดส่อง" : "ห้องข่าว คุณรวิศ สอดส่อง"} 
+          subtitle="Newsroom & Public Relations" 
+          action={
+            <div className="flex flex-wrap items-end gap-3 bg-white p-2 rounded-xl border shadow-sm">
+              <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold ml-1">ตั้งแต่วันที่</span><input type="date" value={newsStartDate} onChange={e => setNewsStartDate(e.target.value)} className="text-xs border rounded-lg p-1.5 outline-none focus:border-blue-500 text-slate-600" /></div>
+              <div className="flex flex-col"><span className="text-[10px] text-slate-400 font-bold ml-1">ถึงวันที่</span><input type="date" value={newsEndDate} onChange={e => setNewsEndDate(e.target.value)} className="text-xs border rounded-lg p-1.5 outline-none focus:border-blue-500 text-slate-600" /></div>
+              <button onClick={() => { setNewsStartDate(''); setNewsEndDate(''); setNewsFilterTag('All'); }} className="p-2 rounded-full text-slate-400 transition-all duration-300 group relative hover:text-white hover:bg-red-500" title="ล้างค่า">
+                  <RefreshCw className="w-4 h-4" />
+              </button>
+              <div className="w-px h-8 bg-slate-200 mx-1"></div>
+              <button onClick={() => setIsTagManagerOpen(true)} className="bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-black flex items-center gap-1.5 whitespace-nowrap flex-shrink-0">
+                <Tag className="w-3.5 h-3.5" /> จัดการ Tag
+              </button>
+              <button onClick={() => addPublishedLink(ownerType)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 shadow-md flex items-center gap-1.5 whitespace-nowrap flex-shrink-0">
+                <Plus className="w-4 h-4" /> เพิ่มข่าว{ownerType === 'tawee' ? 'ท่านทวี' : 'คุณรวิศ'}
+              </button>
+            </div>
+          } 
+        />
+        
         <div className="w-full overflow-x-auto pb-2 custom-scrollbar -mt-2">
           <div className="flex items-center gap-2 min-w-max px-1">
             <Tag className="w-4 h-4 text-slate-400 mr-2" />
@@ -467,23 +685,24 @@ export default function TeamTaweeApp() {
             })}
           </div>
         </div>
+        
         {Object.keys(groupedData).length === 0 ? <div className="flex flex-col items-center justify-center h-64 bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400"><Globe className="w-12 h-12 mb-3 opacity-20" /><p>ไม่พบข้อมูลข่าว</p></div> : 
           Object.keys(groupedData).sort((a, b) => b.localeCompare(a)).map(week => (
-            <div key={week} className="bg-white/50 rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden">
+            <div key={week} className="bg-white/50 rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden mb-6">
               <div className="absolute top-0 left-0 bg-blue-600 text-white text-xs font-black px-4 py-1.5 rounded-br-2xl shadow-sm z-10">{week}</div>
               <div className="space-y-8 mt-4">
                 {Object.keys(groupedData[week]).sort((a, b) => { const getLinkDate = (k) => { const l = groupedData[week][k][0]; return (l.createdAt.toDate ? l.createdAt.toDate() : new Date(l.createdAt)).getTime(); }; return getLinkDate(b) - getLinkDate(a); }).map(day => (
                   <div key={day}>
                     <h3 className="flex items-center gap-2 text-slate-700 font-bold mb-4 pb-2 border-b border-slate-200"><Calendar className="w-4 h-4 text-blue-500" /> {day}</h3>
-                    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                       {groupedData[week][day].map(link => (
                         <div key={link.id} className="group bg-white rounded-xl overflow-hidden border border-slate-100 hover:border-blue-300 hover:shadow-xl transition-all duration-300 flex flex-col h-full">
                           <div className="aspect-video bg-slate-100 relative overflow-hidden group-hover:shadow-inner">
-                            {link.imageUrl ? <img src={`https://wsrv.nl/?url=${encodeURIComponent(link.imageUrl)}&w=400&q=75`} alt={link.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" onError={(e) => { e.target.onerror = null; e.target.src = e.target.src.includes('wsrv.nl') ? link.imageUrl : "https://placehold.co/600x400?text=No+Image"; }} /> : <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><FileText className="w-10 h-10 mb-1" /><span className="text-[10px]">No Image</span></div>}
+                            {link.imageUrl ? <img src={`https://wsrv.nl/?url=${encodeURIComponent(link.imageUrl)}&w=400&q=75`} alt={link.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" /> : <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><FileText className="w-10 h-10 mb-1" /><span className="text-[10px]">No Image</span></div>}
                             <a href={link.url} target="_blank" rel="noreferrer" className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"><ExternalLink className="w-8 h-8 text-white drop-shadow-md" /></a>
                           </div>
                           <div className="p-4 flex flex-col flex-1">
-                            <div className="flex flex-wrap gap-1 mb-2.5">{(link.tags || []).map((tag, idx) => <span key={idx} className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white shadow-sm transition hover:opacity-80" style={{ backgroundColor: getTagColor(tag) }}>#{tag}</span>)}</div>
+                            <div className="flex flex-wrap gap-1 mb-2.5">{(link.tags || []).map((tag, idx) => <span key={idx} className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: getTagColor(tag) }}>#{tag}</span>)}</div>
                             <div className="flex justify-between items-start mb-2">
                                 <span className="bg-blue-50 text-blue-600 text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">{link.platform || 'News'}</span>
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
@@ -492,8 +711,15 @@ export default function TeamTaweeApp() {
                                 </div>
                             </div>
                             <a href={link.url} target="_blank" rel="noreferrer" className="font-bold text-slate-800 text-sm leading-snug line-clamp-2 hover:text-blue-600 transition mb-2">{link.title}</a>
-                            <div className="text-[10px] text-slate-400 font-medium mb-3 flex items-center gap-1"><LinkIcon className="w-3 h-3" />{getDomain(link.url)}</div>
-                            <div className="mt-auto pt-3 border-t border-slate-50 flex justify-between items-center text-[10px] text-slate-400"><span>{link.createdAt ? (link.createdAt.toDate ? link.createdAt.toDate() : new Date(link.createdAt)).toLocaleString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + ' น.' : '-'}</span></div>
+                            
+                            {/* --- เพิ่มส่วนแสดงแหล่งที่มา (Domain) ตรงนี้ครับ --- */}
+                            <div className="text-[10px] text-slate-400 font-medium mb-3 flex items-center gap-1 bg-slate-50 p-1 rounded w-fit">
+                                <LinkIcon className="w-3 h-3" />
+                                <span className="truncate max-w-[150px]">{getDomain(link.url)}</span>
+                            </div>
+                            {/* ------------------------------------------- */}
+
+                            <div className="mt-auto pt-3 border-t border-slate-50 flex justify-between items-center text-[10px] text-slate-400"><span>{link.createdAt ? formatDate(link.createdAt).split(' ')[0] : '-'}</span></div>
                           </div>
                         </div>
                       ))}
@@ -504,24 +730,32 @@ export default function TeamTaweeApp() {
             </div>
           ))
         }
-        <button onClick={() => addPublishedLink()} className="fixed bottom-8 right-8 z-[50] bg-blue-600 text-white w-14 h-14 rounded-full shadow-2xl hover:bg-blue-700 hover:scale-110 active:scale-95 transition-all duration-300 flex items-center justify-center group" title="เพิ่มข่าวประชาสัมพันธ์" style={{ boxShadow: '0 4px 20px rgba(37, 99, 235, 0.5)' }}>
-          <Plus className="w-8 h-8" /><span className="absolute right-16 bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">เพิ่มข่าวใหม่</span>
+        
+        <button onClick={() => addPublishedLink(ownerType)} className="fixed bottom-8 right-8 z-[50] bg-blue-600 text-white w-14 h-14 rounded-full shadow-2xl hover:bg-blue-700 hover:scale-110 active:scale-95 transition-all flex items-center justify-center">
+          <Plus className="w-8 h-8" />
         </button>
-        <TagManagerModal isOpen={isTagManagerOpen} onClose={() => setIsTagManagerOpen(false)} existingTags={systemTags} onSave={saveSystemTags} />
       </div>
     );
   };
 
   const renderContent = () => {
-    // --- บรรทัดนี้ถูกลบออกเพื่อให้แสดงเนื้อหาเดิมขณะโหลดแทน ---
-    // if (isDataLoading) return <div className="flex h-64 items-center justify-center text-slate-400"><RefreshCw className="w-6 h-6 animate-spin mr-2"/> Loading Database...</div>;
-    
     if (activeTab === 'dashboard') return renderDashboard();
-    if (activeTab === 'strategy') return renderStrategy();
+    
+    // ห้องข่าว
+    if (activeTab === 'newsroom_tawee') return renderNewsroom('tawee'); 
+    if (activeTab === 'newsroom_ravit') return renderNewsroom('ravit');
+    
+    // กระดาน 4 แกน (แยกใหม่)
+    if (activeTab === 'strategy_tawee') return renderStrategy('tawee');
+    if (activeTab === 'strategy_ravit') return renderStrategy('ravit');
+    if (activeTab === 'strategy') return renderStrategy('tawee'); // Fallback สำหรับอันเดิม
+
     if (activeTab === 'masterplan') return renderMasterPlan();
     if (activeTab === 'rapidresponse') return renderRapidResponse();
     if (activeTab === 'assets') return renderAssets();
-    if (activeTab === 'newsroom') return renderNewsroom();
+    if (activeTab === 'newsroom') return renderNewsroom('tawee'); 
+    
+    // ส่วน admin คงเดิม...
     if (activeTab === 'admin') {
       if(userProfile?.role !== 'Admin') return <div className="p-10 text-center text-red-500">Access Denied</div>;
       return (
@@ -591,6 +825,8 @@ export default function TeamTaweeApp() {
       <SearchModal isOpen={isSearchOpen} onClose={()=>setIsSearchOpen(false)} data={{tasks, media, channels}} onNavigate={navigateTo} />
       <ProfileModal isOpen={showProfileModal} onClose={() => setShowProfileModal(false)} user={currentUser} userProfile={userProfile} onUpdate={handleUpdateProfile} />
       <TagManagerModal isOpen={isStrategyTagManagerOpen} onClose={() => setIsStrategyTagManagerOpen(false)} existingTags={tagsForStrategyManager} onSave={saveStrategyTags} title="จัดการ Tag (กระดาน 4 แกน)" />
+        {/* เพิ่มบรรทัดด้านล่างนี้ */}
+<TagManagerModal isOpen={isTagManagerOpen} onClose={() => setIsTagManagerOpen(false)} existingTags={systemTags} onSave={saveSystemTags} title="จัดการ Tag (ห้องข่าว)" />
 
       {/* --- SIDEBAR --- */}
       <aside className={`bg-slate-900 text-white w-full md:w-64 flex-shrink-0 transition-all duration-300 fixed md:relative z-30 h-screen md:h-full flex flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
