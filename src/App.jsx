@@ -642,7 +642,16 @@ export default function TeamTaweeApp() {
       if (!link.createdAt) return;
       const dateObj = link.createdAt.toDate ? link.createdAt.toDate() : new Date(link.createdAt);
       if (isNaN(dateObj.getTime())) return;
-      const weekKey = `${getWeekNumber(dateObj)} (${dateObj.getFullYear()})`;
+
+      // --- ส่วนที่แก้ไข Logic การหาปี ISO ---
+      const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+      d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+      const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+      const isoYear = d.getUTCFullYear(); // ใช้ปี ISO ที่ถูกต้อง
+      const weekKey = `Week ${weekNo} (${isoYear})`;
+      // ------------------------------------
+
       const dayKey = dateObj.toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' });
       if (!groupedData[weekKey]) groupedData[weekKey] = {};
       if (!groupedData[weekKey][dayKey]) groupedData[weekKey][dayKey] = [];
@@ -688,7 +697,6 @@ export default function TeamTaweeApp() {
         
         {Object.keys(groupedData).length === 0 ? <div className="flex flex-col items-center justify-center h-64 bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400"><Globe className="w-12 h-12 mb-3 opacity-20" /><p>ไม่พบข้อมูลข่าว</p></div> : 
           Object.keys(groupedData).sort((a, b) => {
-            // ฟังก์ชันแกะเลขสัปดาห์และปีออกจากข้อความ เช่น "Week 5 (2026)"
             const extract = (s) => {
               const match = s.match(/Week (\d+) \((\d+)\)/);
               return match ? { w: parseInt(match[1]), y: parseInt(match[2]) } : { w: 0, y: 0 };
@@ -696,9 +704,9 @@ export default function TeamTaweeApp() {
             const da = extract(a);
             const db = extract(b);
             
-            // เรียงปีจากมากไปน้อยก่อน (2026 มาก่อน 2025)
+            // เรียงปีจากมากไปน้อย (2025 มาก่อน 2024)
             if (da.y !== db.y) return db.y - da.y;
-            // ถ้าปีเท่ากัน ให้เรียงสัปดาห์จากมากไปน้อย
+            // เรียงสัปดาห์จากมากไปน้อย (Week 52 มาก่อน Week 1)
             return db.w - da.w;
           }).map(week => (
             <div key={week} className="bg-white/50 rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden mb-6">
