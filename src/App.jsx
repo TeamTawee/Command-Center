@@ -687,7 +687,20 @@ export default function TeamTaweeApp() {
         </div>
         
         {Object.keys(groupedData).length === 0 ? <div className="flex flex-col items-center justify-center h-64 bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400"><Globe className="w-12 h-12 mb-3 opacity-20" /><p>ไม่พบข้อมูลข่าว</p></div> : 
-          Object.keys(groupedData).sort((a, b) => b.localeCompare(a)).map(week => (
+          Object.keys(groupedData).sort((a, b) => {
+            // ฟังก์ชันแกะเลขสัปดาห์และปีออกจากข้อความ เช่น "Week 5 (2026)"
+            const extract = (s) => {
+              const match = s.match(/Week (\d+) \((\d+)\)/);
+              return match ? { w: parseInt(match[1]), y: parseInt(match[2]) } : { w: 0, y: 0 };
+            };
+            const da = extract(a);
+            const db = extract(b);
+            
+            // เรียงปีจากมากไปน้อยก่อน (2026 มาก่อน 2025)
+            if (da.y !== db.y) return db.y - da.y;
+            // ถ้าปีเท่ากัน ให้เรียงสัปดาห์จากมากไปน้อย
+            return db.w - da.w;
+          }).map(week => (
             <div key={week} className="bg-white/50 rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden mb-6">
               <div className="absolute top-0 left-0 bg-blue-600 text-white text-xs font-black px-4 py-1.5 rounded-br-2xl shadow-sm z-10">{week}</div>
               <div className="space-y-8 mt-4">
